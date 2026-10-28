@@ -335,9 +335,6 @@ h3, .card-heading {
   transition: all 0.2s ease;
 }
 .btn-icon:hover {
-  background-color: #F1F5F9;
-  color: var(--btn-primary);
-  border-color: #94A3B8;
 }
 
 /* MANDATED QUESTION CARD (Width: 900px, Centered, Padding: 32px, Radius: 18px, Background: #FFFCF4) */

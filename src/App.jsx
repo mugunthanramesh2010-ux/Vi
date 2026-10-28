@@ -35,6 +35,7 @@ import StudentManagementPage from './components/pages/StudentManagementPage';
 import FacultyResultsPage from './components/pages/FacultyResultsPage';
 import SecurityAnalyticsPage from './components/pages/SecurityAnalyticsPage';
 import ExportCenterPage from './components/pages/ExportCenterPage';
+import LiveAssessmentMonitorPage from './components/pages/LiveAssessmentMonitorPage';
 
 // Shared Profile Page (Page 24)
 import ProfilePage from './components/pages/ProfilePage';
@@ -57,18 +58,59 @@ import {
   markAssignmentCompleted
 } from './services/db';
 import { generateUniversalTopicModel } from './services/universalOntology';
-import { AdaptiveEngine } from './services/adaptiveEngine';
+import { GenerateAcademicQuestionPackage } from './services/academicAssessmentEngine';
+import {
+  AdaptiveEngine,
+  StudentMasteryModel,
+  selectAdaptiveNextQuestion,
+  generateAdaptiveHint,
+  getTopicKnowledgeMap
+} from './services/adaptiveEngine';
 import { soundEffects } from './services/soundEffects';
 
+const DEFAULT_CANDIDATE_USER = {
+  id: 'candidate_viva_01',
+  username: 'candidate',
+  name: 'Candidate Scholar',
+  role: 'student',
+  department: 'Biotechnology Engineering',
+  year: '4th Year',
+  enrollmentId: 'VA-2026-BIOTECH-001'
+};
+
+export function buildInitialVivaTopicModel() {
+  const configs = [
+    { subjectName: 'Biotechnology', topic: 'Bioreactor Design', concept: 'Oxygen Transfer', questionType: 'mcq', difficulty: 'Intermediate' },
+    { subjectName: 'Biotechnology', topic: 'Bioreactor Design', concept: 'Oxygen Transfer', questionType: 'numerical', difficulty: 'Intermediate' },
+    { subjectName: 'Biotechnology', topic: 'Bioreactor Design', concept: 'Oxygen Transfer', questionType: 'diagram', difficulty: 'Intermediate' },
+    { subjectName: 'Biotechnology', topic: 'Bioreactor Design', concept: 'Oxygen Transfer', questionType: 'scenario', difficulty: 'Intermediate' },
+    { subjectName: 'Biotechnology', topic: 'Bioreactor Design', concept: 'Sterilization', questionType: 'mcq', difficulty: 'Intermediate' },
+    { subjectName: 'Biotechnology', topic: 'Bioreactor Design', concept: 'Oxygen Transfer', questionType: 'text', difficulty: 'Advanced' }
+  ];
+
+  const questions = configs.map((cfg, idx) => ({
+    ...GenerateAcademicQuestionPackage(cfg),
+    index: idx
+  }));
+
+  return {
+    title: 'Biotechnology: Bioreactor Design',
+    subject: 'Biotechnology',
+    topic: 'Bioreactor Design',
+    domain: 'Engineering',
+    questions
+  };
+}
+
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser() || DEFAULT_CANDIDATE_USER);
   
   // Navigation active tab:
   // Public: 'landing' | 'register-type' | 'student-register' | 'faculty-register' | 'student-login' | 'faculty-login' | 'forgot-password'
   // Student: 'student-dashboard' | 'my-assignments' | 'self-learning' | 'viva-instructions' | 'question-page' | 'answer-evaluation' | 'final-result' | 'learning-dna' | 'knowledge-map' | 'profile'
   // Faculty: 'faculty-dashboard' | 'create-assignment' | 'faculty-students' | 'faculty-results' | 'security-analytics' | 'export-center' | 'profile'
-  // Default to student-login when user enters the link
-  const [activeTab, setActiveTab] = useState('student-login');
+  // Directly start on question-page for immediate academic testing
+  const [activeTab, setActiveTab] = useState('question-page');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(typeof window !== 'undefined' ? window.innerWidth < 1024 : false);
   const [activeAssignmentMode, setActiveAssignmentMode] = useState('Mixed');
   const [activeAssignmentId, setActiveAssignmentId] = useState(null); // Locked after single attempt for faculty; null for unlimited self-learning
@@ -79,10 +121,10 @@ export default function App() {
   const [domainBrowserOpen, setDomainBrowserOpen] = useState(false);
   const [installModalOpen, setInstallModalOpen] = useState(false);
 
-  // Core Intelligence Engines (100% Offline AI & Adaptive Engine)
-  const [topicModel, setTopicModel] = useState(() => generateUniversalTopicModel('General Engineering', 'Engineering', 10));
+  // Core Intelligence Engines (100% Subject-Locked Academic Engine)
+  const [topicModel, setTopicModel] = useState(() => buildInitialVivaTopicModel());
   const [adaptiveEngine, setAdaptiveEngine] = useState(() => new AdaptiveEngine());
-  const [activeSubjectName, setActiveSubjectName] = useState('General Engineering');
+  const [activeSubjectName, setActiveSubjectName] = useState('Biotechnology');
   const [activeFacultyTotalMarks, setActiveFacultyTotalMarks] = useState(100);
 
   // Assessment Runtime State (Page 12, 13, 14, 15)
@@ -93,22 +135,15 @@ export default function App() {
   const [sessionQuestionHistory, setSessionQuestionHistory] = useState([]);
   const [latestSessionResult, setLatestSessionResult] = useState(null);
 
-  // Initialize offline database and session on mount: Give Login First!
+  // Initialize offline database and session on mount: directly enter Question & Answer Mode
   useEffect(() => {
     initDatabase();
 
-    const user = getCurrentUser();
-    if (user) {
-      setCurrentUser(user);
-      setAdaptiveEngine(new AdaptiveEngine(user.dnaProfile, user.cognitiveTwin));
-      if (user.role === 'faculty') {
-        setActiveTab('faculty-dashboard');
-      } else {
-        setActiveTab('student-dashboard');
-      }
-    } else {
-      setActiveTab('student-login');
-    }
+    const user = getCurrentUser() || DEFAULT_CANDIDATE_USER;
+    setCurrentUser(user);
+    setAdaptiveEngine(new AdaptiveEngine(user.dnaProfile, user.cognitiveTwin));
+    // Immediately land on Question Page
+    setActiveTab('question-page');
   }, []);
 
   // Authentication Handlers
@@ -134,11 +169,25 @@ export default function App() {
   const getStudentSafeQuestion = (rawQ) => {
     if (!rawQ) return null;
     const isStudentAssessment = currentUser?.role === 'student' || Boolean(activeAssignmentId);
+    const resolvedSubject = rawQ.subject || topicModel?.subject || activeSubjectName || 'Academic Discipline';
+    const resolvedTopic = rawQ.topic || topicModel?.topic || (activeSubjectName ? activeSubjectName + ' Core Topics' : 'Fundamentals');
+    const resolvedConcept = rawQ.concept || (resolvedTopic ? resolvedTopic + ' Principles' : 'Foundations');
+
     if (!isStudentAssessment) {
-      return rawQ; // Faculty/Authoring/Review mode retains all authoring metadata
+      return {
+        ...rawQ,
+        subject: resolvedSubject,
+        topic: resolvedTopic,
+        concept: resolvedConcept
+      }; // Faculty/Authoring/Review mode retains all authoring metadata
     }
     const { correctIndex, modelAnswer, rubric, ...studentSafe } = rawQ;
-    return studentSafe;
+    return {
+      ...studentSafe,
+      subject: resolvedSubject,
+      topic: resolvedTopic,
+      concept: resolvedConcept
+    };
   };
 
   // Topic & Subject Selection (Any Subject, 1 to 100 Questions, Assigned Mode)
@@ -152,6 +201,35 @@ export default function App() {
     setActiveHintLevel(0);
     setSessionQuestionHistory([]);
     setActiveTab('viva-instructions');
+  };
+
+  // Instant Academic Subject/Topic/Concept Switcher
+  const handleSelectAcademicTopic = (subject, topic, concept, questionType = 'mcq') => {
+    soundEffects.playClick();
+    const formats = ['mcq', 'numerical', 'diagram', 'scenario', 'text'];
+    const newQuestions = formats.map((fmt, idx) => ({
+      ...GenerateAcademicQuestionPackage({
+        subjectName: subject,
+        topic: topic,
+        concept: concept,
+        questionType: idx === 0 ? questionType : fmt,
+        index: idx + 1
+      }),
+      index: idx
+    }));
+
+    setTopicModel({
+      title: `${subject}: ${topic}`,
+      subject,
+      topic,
+      domain: 'Engineering',
+      questions: newQuestions
+    });
+    setActiveSubjectName(subject);
+    setCurrentQuestionIndex(0);
+    setActiveHintLevel(0);
+    setIsHintModalOpen(false);
+    setCurrentEvaluation(null);
   };
 
   // Start Assessment Flow
@@ -248,6 +326,8 @@ export default function App() {
 
     const evalPayload = {
       status: statusText,
+      tier: evalResult?.tier || (statusText === 'Correct' ? 'CORRECT_SOUND_REASONING' : (statusText === 'Partially Correct' ? 'PARTIALLY_CORRECT' : 'INCORRECT_UNIDENTIFIED')),
+      diagnosedMisconception: evalResult?.diagnosedMisconception || null,
       feedback: evalResult.feedback || 'Technical explanation verified with conceptual depth.',
       score: scoreVal,
       knowledgeChange: `+${(Math.random() * 4 + 2).toFixed(1)}%`,
@@ -301,31 +381,68 @@ export default function App() {
     if (nextIdx < questions.length) {
       // DYNAMIC ADAPTIVE GENERATION: Adjust next question based on intelligence of previous answer
       const lastEval = currentEvaluation;
-      const targetQ = { ...questions[nextIdx] };
+      let targetQ = { ...questions[nextIdx] };
       const currentTopic = topicModel?.title || 'Subject';
 
       if (lastEval) {
+        try {
+          const adaptivePkg = selectAdaptiveNextQuestion({
+            subjectName: topicModel?.subject || 'Biotechnology',
+            topicName: topicModel?.topic || 'Bioreactor Design',
+            masteryModel: adaptiveEngine?.masteryModel,
+            lastEvaluation: lastEval,
+            previousQuestions: questions.slice(0, nextIdx),
+            currentIndex: nextIdx,
+            requestedCount: questions.length
+          });
+          if (adaptivePkg && adaptivePkg.id) {
+            targetQ = {
+              ...targetQ,
+              ...adaptivePkg,
+              index: nextIdx,
+              subject: topicModel?.subject || targetQ.subject,
+              topic: topicModel?.topic || targetQ.topic,
+              adaptiveNote: adaptivePkg.adaptiveReason || targetQ.adaptiveNote
+            };
+          }
+        } catch (e) {
+          console.warn('selectAdaptiveNextQuestion caught:', e);
+        }
+
         if (lastEval.status === 'Correct') {
           // High intelligence shown -> Adapt upward to deeper Bloom synthesis and failure analysis
-          targetQ.bloomLevel = nextIdx % 2 === 0 ? 'Synthesis' : 'Evaluation';
-          targetQ.difficulty = '4.5 / 5 (Advanced Analysis)';
-          targetQ.adaptiveNote = 'Elevated to higher cognitive depth following accurate reasoning in previous question';
-          if (!targetQ.questionText.includes('[Advanced Analysis]')) {
-            targetQ.questionText = `[Advanced Synthesis & Edge Analysis]: Evaluating boundary non-linearities and failure modes in ${currentTopic} — ${targetQ.questionText}`;
-          }
+          targetQ.bloomLevel = targetQ.bloomLevel || (nextIdx % 2 === 0 ? 'Synthesis' : 'Evaluation');
+          targetQ.difficulty = targetQ.difficulty || '4.5 / 5 (Advanced Analysis)';
+          targetQ.adaptiveNote = targetQ.adaptiveNote || 'Elevated to higher cognitive depth following accurate reasoning in previous question';
         } else if (lastEval.status === 'Needs Improvement') {
           // Conceptual gaps detected -> Adapt to foundational scaffolding and governing equations
-          targetQ.bloomLevel = 'Understanding';
-          targetQ.difficulty = '2.5 / 5 (Foundational Reinforcement)';
-          targetQ.adaptiveNote = 'Calibrated to reinforce foundational principles and governing equations';
-          if (!targetQ.questionText.includes('[Foundations]')) {
-            targetQ.questionText = `[Foundational Reinforcement]: Reviewing the underlying causal mechanism for ${currentTopic} — ${targetQ.questionText}`;
-          }
+          targetQ.bloomLevel = targetQ.bloomLevel || 'Understanding';
+          targetQ.difficulty = targetQ.difficulty || '2.5 / 5 (Foundational Scaffolding)';
+          targetQ.adaptiveNote = targetQ.adaptiveNote || 'Calibrated to reinforce foundational principles and governing equations';
         } else {
           // Partially correct -> Test intermediate boundary parameters
-          targetQ.bloomLevel = 'Application';
-          targetQ.difficulty = '3.5 / 5 (Targeted Exploration)';
-          targetQ.adaptiveNote = 'Calibrated to test intermediate governing constraints';
+          targetQ.bloomLevel = targetQ.bloomLevel || 'Application';
+          targetQ.difficulty = targetQ.difficulty || '3.5 / 5 (Targeted Exploration)';
+          targetQ.adaptiveNote = targetQ.adaptiveNote || 'Calibrated to test intermediate governing constraints';
+        }
+
+        // Authoritative context safety gate: Never allow targetQ to diverge from active topicModel subject/topic
+        if (targetQ.subject !== topicModel?.subject || targetQ.topic !== topicModel?.topic) {
+          const regenerated = GenerateAcademicQuestionPackage({
+            subjectName: topicModel?.subject || 'Biotechnology',
+            topic: topicModel?.topic || 'Bioreactor Design',
+            concept: targetQ.concept || topicModel?.topic || 'Oxygen Transfer',
+            questionType: targetQ.type || 'mcq',
+            difficulty: targetQ.difficulty,
+            index: nextIdx + 1
+          });
+          targetQ = {
+            ...targetQ,
+            ...regenerated,
+            index: nextIdx,
+            subject: topicModel?.subject || 'Biotechnology',
+            topic: topicModel?.topic || 'Bioreactor Design'
+          };
         }
 
         // Shuffle options for next question so correct answer is randomly positioned (A, B, C, or D)
@@ -452,6 +569,7 @@ export default function App() {
       pasteAttempts: totalPastes,
       copyAttempts: totalCopies,
       wpm: currentEvaluation?.behaviorMetrics?.wpm || 64,
+      topicMasteryReport: adaptiveEngine?.masteryModel?.generateTopicMasteryReport ? adaptiveEngine.masteryModel.generateTopicMasteryReport() : null,
       questionTimingHistory: sessionQuestionHistory
     };
 
@@ -659,16 +777,22 @@ export default function App() {
                     <QuestionPage
                       question={getStudentSafeQuestion(topicModel?.questions?.[currentQuestionIndex])}
                       questionIndex={currentQuestionIndex}
-                      totalQuestions={topicModel?.questions?.length || 10}
-                      assignedMarks={Math.max(1, Math.round((activeFacultyTotalMarks || 100) / (topicModel?.questions?.length || 10)))}
+                      totalQuestions={topicModel?.questions?.length || 7}
+                      assignedMarks={Math.max(1, Math.round((activeFacultyTotalMarks || 100) / (topicModel?.questions?.length || 7)))}
                       difficulty="Bloom Scale"
                       bloomLevel={topicModel?.questions?.[currentQuestionIndex]?.bloomLevel || 'Understanding'}
-                      assignedMode={activeAssignmentMode}
+                      assignedMode={topicModel?.questions?.[currentQuestionIndex]?.type === 'text' ? 'Conceptual Text' : 'Choice Based (MCQ)'}
                       onRequestHint={handleRequestHint}
                       onSubmitAnswer={handleSubmitAnswer}
                       activeHintCount={activeHintLevel}
                       onDisqualify={handleDisqualifyStudent}
                       sessionQuestionHistory={sessionQuestionHistory}
+                      onSelectAcademicTopic={handleSelectAcademicTopic}
+                      onChangeQuestionIndex={(idx) => {
+                        setCurrentQuestionIndex(idx);
+                        setActiveHintLevel(0);
+                        setIsHintModalOpen(false);
+                      }}
                     />
                   )}
 
@@ -736,6 +860,14 @@ export default function App() {
                   {/* Page 19: Create Assignment */}
                   {activeTab === 'create-assignment' && (
                     <CreateAssignmentPage
+                      currentUser={currentUser}
+                      onNavigate={setActiveTab}
+                    />
+                  )}
+
+                  {/* Live Assessment Monitor */}
+                  {activeTab === 'live-monitor' && (
+                    <LiveAssessmentMonitorPage
                       currentUser={currentUser}
                       onNavigate={setActiveTab}
                     />

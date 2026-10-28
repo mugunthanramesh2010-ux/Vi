@@ -1,36 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Clock, Award, Play, Eye, RotateCw, Lock, ShieldCheck, AlertCircle } from 'lucide-react';
 import { getCohortAssignments, isAssignmentCompletedByStudent } from '../../services/db';
 
 export default function MyAssignmentsPage({ currentUser, onStartAssignment, onViewResult }) {
-  const [assignments] = useState(() => {
+  const [assignments, setAssignments] = useState(() => {
     const list = getCohortAssignments();
     const userYear = currentUser?.year || 'III';
     const userSection = currentUser?.section || 'A';
-    const userDept = currentUser?.department || '';
 
-    // Filter to ensure only this student's class and section assignments are shown
-    const matching = (list && list.length > 0 ? list : [
-      {
-        id: 'asg-1',
-        assignmentName: 'Strength of Materials & Stress Analysis Viva',
-        subject: 'Solid Mechanics & Strength of Materials',
-        topic: 'Stress in Strength of Materials',
-        targetYear: userYear,
-        targetSection: userSection,
-        faculty: 'Dr. S. Ramanathan',
-        deadline: 'Active Session',
-        marks: 100,
-        questionCount: 10,
-        status: 'ACTIVE'
-      }
-    ]).filter(a => {
+    return (list || []).filter(a => {
       const yearMatch = !a.targetYear || a.targetYear === 'All Years' || a.targetYear === userYear;
-      const secMatch = !a.targetSection || a.targetSection === 'All Sections' || a.targetSection === userSection;
+      const secList = Array.isArray(a.targetSections) && a.targetSections.length > 0
+        ? a.targetSections
+        : (a.targetSection ? [a.targetSection] : ['A']);
+      const secMatch = secList.includes('All Sections') || secList.includes('ALL') || secList.includes(userSection);
       return yearMatch && secMatch;
-    });
-
-    return matching.map((a, idx) => {
+    }).map((a, idx) => {
       const resolvedSubject = (a.subject || a.subjectName || a.assignmentName || 'Engineering Viva').trim();
       const resolvedTopic = (a.topic && a.topic.trim()) || resolvedSubject;
       return {
@@ -45,11 +30,56 @@ export default function MyAssignmentsPage({ currentUser, onStartAssignment, onVi
         mode: a.mode || 'Mixed',
         targetYear: a.targetYear || userYear,
         targetSection: a.targetSection || userSection,
-        status: a.status || (idx === 0 ? 'ACTIVE' : 'IN_PROGRESS'),
+        status: a.status || 'ACTIVE',
         documentContext: a.documentContext || ''
       };
     });
   });
+
+  // Fetch live eligible assignments from server API
+  useEffect(() => {
+    fetch('/api/assessments/eligible', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentUser: {
+          username: currentUser?.regNo || currentUser?.username || 'student_a',
+          name: currentUser?.fullName || currentUser?.name || 'Student',
+          regNo: currentUser?.regNo || '22ECE042',
+          year: currentUser?.year || 'III',
+          section: currentUser?.section || 'A',
+          department: currentUser?.department || 'Biotechnology'
+        }
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.success && Array.isArray(data.assessments)) {
+          setAssignments(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newItems = data.assessments
+              .filter(a => !existingIds.has(a.id))
+              .map(a => ({
+                id: a.id,
+                assignmentName: a.title,
+                subject: a.subject,
+                topic: a.topic,
+                faculty: a.facultyName || 'Faculty In-Charge',
+                deadline: `${a.durationMinutes || 15} mins session`,
+                marks: a.totalMarks || 100,
+                questionCount: a.questionCount || 10,
+                mode: a.mode || 'Mixed',
+                targetYear: a.classYear,
+                targetSection: Array.isArray(a.targetSections) ? a.targetSections.join(', ') : a.targetSection,
+                status: a.status || 'ACTIVE',
+                documentContext: a.documentContext || ''
+              }));
+            return [...newItems, ...prev];
+          });
+        }
+      })
+      .catch(() => {});
+  }, [currentUser]);
 
   return (
     <div className="space-y-[28px] animate-fade-in w-full text-left py-2">

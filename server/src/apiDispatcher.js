@@ -17,6 +17,13 @@ import { documentProcessor } from './ai/documentProcessor.js';
 import { referenceRetriever } from './ai/referenceRetriever.js';
 import { eventLogger } from './antiCheat/eventLogger.js';
 import { generateOfflineDeepQuestions } from '../../src/services/aiQuestionService.js';
+import { sessionPlanner } from './ai/sessionPlanner.js';
+import { learningMemory } from './services/learningMemory.js';
+import { multiModelOrchestrator } from './ai/orchestrator/multiModelOrchestrator.js';
+import { assessmentManager } from './services/assessmentManager.js';
+import { conceptGraphEngine } from './ai/conceptGraphEngine.js';
+import { adaptiveStudentIntelligence } from './ai/adaptiveStudentIntelligence.js';
+import { selfLearningService } from './services/selfLearningService.js';
 
 export async function handleApiRequest(pathname, method, body, headers = {}) {
   // Extract session token from Authorization header or Cookie
@@ -75,6 +82,18 @@ export async function handleApiRequest(pathname, method, body, headers = {}) {
     const health = await modelHealth.checkHealth();
     return { status: 200, body: { success: true, ...health } };
   }
+  // 2b. ENSEMBLE ORCHESTRATION STATUS (Faculty only)
+  if (pathname === '/api/ai/orchestrator/status' && method === 'GET') {
+    const status = await multiModelOrchestrator.getOrchestrationStatus();
+    return { status: 200, body: { success: true, ...status } };
+  }
+
+  // 2c. TEN-STAGE TOPIC-LOCKED CURRICULUM SESSION PLAN
+  if (pathname === '/api/ai/viva/session-plan' && method === 'POST') {
+    const { subject, topic, count, mode } = body;
+    const plan = sessionPlanner.createSessionPlan(subject, topic, { count: count || 10, mode: mode || 'Mixed' });
+    return { status: 200, body: { success: true, plan } };
+  }
 
   // 3. GROUNDED MULTIMODAL QUESTION GENERATION
   if (pathname === '/api/ai/viva/grounded-question' && method === 'POST') {
@@ -94,11 +113,20 @@ export async function handleApiRequest(pathname, method, body, headers = {}) {
     });
 
     const question = await questionGenerator.generateQuestion(context, body);
+
+    // Strict student-facing isolation: strip answer keys, rubrics, and internal model telemetry
+    const isStudent = body.isStudentFacing || session?.role === 'student' || body.role === 'student';
+    let safeQuestion = question;
+    if (isStudent && question) {
+      const { correctIndex, modelAnswer, rubric, telemetry, sourceInstance, distractorRationales, optionsRationale, ...sanitized } = question;
+      safeQuestion = sanitized;
+    }
+
     return {
       status: 200,
       body: {
         success: true,
-        question,
+        question: safeQuestion,
         context: {
           conceptId: context.conceptId,
           sourceType: context.sourceType,
@@ -128,6 +156,22 @@ export async function handleApiRequest(pathname, method, body, headers = {}) {
       { hintsUsed, timeSpentSec: answerTimeSec }
     );
 
+    // Record in persistent learning memory and get topic-adaptive progression
+    const persistentRecord = learningMemory.recordInteraction(
+      studentId,
+      question,
+      studentAnswer,
+      evaluation,
+      { hintsUsed, timeSpentSec: answerTimeSec }
+    );
+
+    const adaptiveStep = learningMemory.getAdaptiveStep(
+      studentId,
+      question.subject,
+      question.topic,
+      body.assessmentMode || 'practice'
+    );
+
     const adaptiveNext = difficultyEngine.determineNextStep(
       evaluation,
       question,
@@ -140,28 +184,129 @@ export async function handleApiRequest(pathname, method, body, headers = {}) {
         success: true,
         evaluation,
         adaptiveNext,
-        masterySummary
+        adaptiveStep,
+        masterySummary,
+        persistentRecord
       }
     };
   }
 
+  // 4b. STUDENT TOPIC-SPECIFIC LEARNING PROFILE
+  if (pathname === '/api/ai/viva/learning-profile' && method === 'GET') {
+    const studentId = session?.username || body.studentId || 'STUDENT';
+    const profile = learningMemory.getStudentProfile(studentId);
+    return { status: 200, body: { success: true, profile } };
+  }
+
   // 5. CONCEPT-SPECIFIC PROGRESSIVE HINT
   if (pathname === '/api/ai/viva/hint' && method === 'POST') {
-    const { question, currentHintLevel = 0, missingConcepts = [] } = body;
-    const hint = hintGenerator.getNextHint(question, currentHintLevel, { missingConcepts });
+    const { question, currentHintLevel = 0, missingConcepts = [], studentError = null, errorCategory = null, studentAnswer = null } = body;
+    const hint = hintGenerator.getNextHint(question, currentHintLevel, { missingConcepts, studentError, errorCategory, studentAnswer });
     return { status: 200, body: { success: true, hint } };
   }
 
-  // 6. FACULTY DOCUMENT UPLOAD & INGESTION
-  if (pathname === '/api/documents/upload' && method === 'POST') {
+  // 6. FACULTY DOCUMENT UPLOAD & INGESTION (PDF, DOCX, PPTX, XLSX, CSV, TXT, Images, ZIP)
+  if ((pathname === '/api/documents/upload' || pathname === '/api/documents/process') && method === 'POST') {
     if (session && session.role !== 'faculty') {
       return { status: 403, body: { success: false, error: 'Only faculty members may upload reference documents.' } };
     }
     const facultyId = session?.username || body.facultyId || 'FACULTY_DEFAULT';
-    const { subjectId = 'GENERAL', filename, textContent, metadata = {} } = body;
+    const { subjectId = 'GENERAL', filename, textContent, contentPayload, metadata = {} } = body;
+    const payload = contentPayload !== undefined ? contentPayload : textContent;
 
-    const result = documentProcessor.processTextDocument(facultyId, subjectId, filename, textContent, metadata);
+    const result = documentProcessor.processDocument(facultyId, subjectId, filename, payload, metadata);
     return { status: 200, body: result };
+  }
+
+  // 6b. LIST & INSPECT PROCESSED DOCUMENTS
+  if (pathname === '/api/documents/list' && (method === 'GET' || method === 'POST')) {
+    const facultyId = session?.username || body.facultyId || 'FACULTY_DEFAULT';
+    const subjectId = body.subjectId || 'GENERAL';
+    const docs = documentProcessor.listProcessedDocuments(facultyId, subjectId);
+    return { status: 200, body: { success: true, count: docs.length, documents: docs } };
+  }
+
+  if (pathname === '/api/documents/inspect' && (method === 'GET' || method === 'POST')) {
+    const facultyId = session?.username || body.facultyId || 'FACULTY_DEFAULT';
+    const { subjectId = 'GENERAL', filename } = body;
+    const doc = documentProcessor.getProcessedDocument(facultyId, subjectId, filename);
+    return { status: doc.found ? 200 : 404, body: doc };
+  }
+
+  if (pathname === '/api/documents/update-chunks' && method === 'POST') {
+    if (session && session.role !== 'faculty') {
+      return { status: 403, body: { success: false, error: 'Only faculty members may edit document chunks.' } };
+    }
+    const facultyId = session?.username || body.facultyId || 'FACULTY_DEFAULT';
+    const { subjectId = 'GENERAL', filename, chunks = [] } = body;
+    const res = documentProcessor.updateDocumentChunks(facultyId, subjectId, filename, chunks);
+    return { status: 200, body: res };
+  }
+
+  // 6c. HYBRID SOURCE RETRIEVAL
+  if (pathname === '/api/documents/retrieve' && method === 'POST') {
+    const facultyId = session?.username || body.facultyId || 'FACULTY_DEFAULT';
+    const { subjectId = 'GENERAL', topic, concept, learningObjective, maxPassages = 5, exclusiveSourceOnly = false, requiredFormat } = body;
+    const res = referenceRetriever.retrievePassages(facultyId, subjectId, topic, maxPassages, {
+      concept,
+      learningObjective,
+      exclusiveSourceOnly,
+      requiredFormat
+    });
+    return { status: 200, body: res };
+  }
+
+  // 6d. CONCEPT KNOWLEDGE GRAPH
+  if (pathname === '/api/ai/concept-graph' && method === 'POST') {
+    const { subject, topic, referencePassages = [] } = body;
+    const graph = conceptGraphEngine.buildConceptGraph(subject, topic, referencePassages);
+    return { status: 200, body: { success: true, graph } };
+  }
+
+  // 6e. SELF-LEARNING ARENA APIS
+  if (pathname === '/api/ai/self-learning/module' && method === 'POST') {
+    const facultyId = session?.username || body.facultyId || 'FACULTY_DEFAULT';
+    const { subject, topic, exclusiveSourceOnly = false } = body;
+    const modData = selfLearningService.getLearningModule(subject, topic, facultyId, { exclusiveSourceOnly });
+    return { status: 200, body: modData };
+  }
+
+  if (pathname === '/api/ai/self-learning/practice' && method === 'POST') {
+    const { subject, topic, count = 5, exclusiveSourceOnly = false, referencePassages = [] } = body;
+    const pSet = selfLearningService.generatePracticeSet(subject, topic, count, { exclusiveSourceOnly, referencePassages });
+    return { status: 200, body: pSet };
+  }
+
+  if (pathname === '/api/ai/self-learning/attempt' && method === 'POST') {
+    const studentId = session?.username || body.studentId || 'STUDENT';
+    const { subject, topic, question, selectedIndex, hintsUsed = 0, timeSpentSec = 20 } = body;
+    const aRes = selfLearningService.submitPracticeAttempt({
+      studentId,
+      subject,
+      topic,
+      question,
+      selectedIndex,
+      hintsUsed,
+      timeSpentSec
+    });
+    return { status: 200, body: aRes };
+  }
+
+  // 6f. ADAPTIVE INTELLIGENCE BKT / IRT EVIDENCE UPDATE
+  if (pathname === '/api/ai/adaptive/update-evidence' && method === 'POST') {
+    const studentId = session?.username || body.studentId || 'STUDENT';
+    const { subject, topic, question, studentAnswer, isCorrect, hintsUsed = 0, responseTimeSeconds = 30 } = body;
+    const adRes = adaptiveStudentIntelligence.processAnswerAndPlanNext({
+      studentId,
+      subject,
+      topic,
+      question,
+      studentAnswer,
+      isCorrect,
+      hintsUsed,
+      responseTimeSeconds
+    });
+    return { status: 200, body: { success: true, ...adRes } };
   }
 
   // 7. ANTI-MALPRACTICE EVENT LOGGING
@@ -269,7 +414,8 @@ Format your response STRICTLY as valid JSON:
     }
 
     // 2. High-speed subject-accurate offline ontology synthesis (Instant < 10ms, 100% domain pure)
-    const domainQuestions = generateOfflineDeepQuestions(cleanTopic, targetCount, documentContext);
+    const cleanSubject = (subject || body.subjectName || '').trim();
+    const domainQuestions = generateOfflineDeepQuestions(cleanTopic, targetCount, documentContext, cleanSubject);
 
     return {
       status: 200,
@@ -354,6 +500,131 @@ Format your response STRICTLY as valid JSON:
         evaluation
       }
     };
+  }
+
+  // 11. STAFF ASSESSMENT CREATION, COHORT ENFORCEMENT & LIVE SESSIONS
+  if (pathname === '/api/assessments/create' && method === 'POST') {
+    const faculty = session || body.facultyUser || { role: 'faculty', username: 'faculty' };
+    try {
+      const created = await assessmentManager.createAssessment(body, faculty);
+      return { status: 200, body: { success: true, assessment: created } };
+    } catch (err) {
+      return { status: 400, body: { success: false, error: err.message } };
+    }
+  }
+
+  if (pathname === '/api/assessments/faculty' && method === 'GET') {
+    const list = assessmentManager.listFacultyAssessments(session?.username);
+    return { status: 200, body: { success: true, assessments: list } };
+  }
+
+  if (pathname === '/api/assessments/update' && method === 'POST') {
+    try {
+      const updated = assessmentManager.updateAssessment(body.assessmentId, body.updateData, session);
+      return { status: 200, body: { success: true, assessment: updated } };
+    } catch (err) {
+      return { status: 400, body: { success: false, error: err.message } };
+    }
+  }
+
+  if (pathname === '/api/assessments/duplicate' && method === 'POST') {
+    try {
+      const dup = assessmentManager.duplicateAssessment(body.assessmentId, session);
+      return { status: 200, body: { success: true, assessment: dup } };
+    } catch (err) {
+      return { status: 400, body: { success: false, error: err.message } };
+    }
+  }
+
+  if (pathname === '/api/assessments/close' && method === 'POST') {
+    try {
+      const closed = assessmentManager.closeAssessment(body.assessmentId);
+      return { status: 200, body: { success: true, assessment: closed } };
+    } catch (err) {
+      return { status: 400, body: { success: false, error: err.message } };
+    }
+  }
+
+  if (pathname === '/api/assessments/eligible' && (method === 'GET' || method === 'POST')) {
+    const studentUser = session || body?.studentUser || accountService.getAccount(headers['x-student-id'] || body?.studentId);
+    if (!studentUser) {
+      return { status: 401, body: { success: false, error: 'Student authentication required.' } };
+    }
+    const eligible = assessmentManager.listEligibleAssessments(studentUser);
+    return { status: 200, body: { success: true, assessments: eligible } };
+  }
+
+  if (pathname === '/api/assessments/start' && method === 'POST') {
+    const studentUser = session || body?.studentUser || accountService.getAccount(headers['x-student-id'] || body?.studentId);
+    if (!studentUser) {
+      return { status: 401, body: { success: false, error: 'Student authentication required.' } };
+    }
+    const startRes = assessmentManager.startAttempt(body.assessmentId, studentUser, {
+      ip: headers['x-forwarded-for'] || '127.0.0.1',
+      userAgent: headers['user-agent'] || 'Browser'
+    });
+    return { status: startRes.status || (startRes.success ? 200 : 400), body: startRes };
+  }
+
+  if (pathname === '/api/assessments/autosave' && method === 'POST') {
+    const studentUser = session || body?.studentUser || accountService.getAccount(headers['x-student-id'] || body?.studentId);
+    if (!studentUser) {
+      return { status: 401, body: { success: false, error: 'Student authentication required.' } };
+    }
+    const saveRes = assessmentManager.autosaveAnswer(body.attemptId, studentUser, body.answer || body);
+    return { status: saveRes.status || (saveRes.success ? 200 : 400), body: saveRes };
+  }
+
+  if (pathname === '/api/assessments/integrity-observation' && method === 'POST') {
+    const studentUser = session || body?.studentUser || accountService.getAccount(headers['x-student-id'] || body?.studentId);
+    if (!studentUser) {
+      return { status: 401, body: { success: false, error: 'Student authentication required.' } };
+    }
+    const obsRes = assessmentManager.logIntegrityObservation(body.attemptId, studentUser, body.observation || body);
+    return { status: 200, body: obsRes };
+  }
+
+  if (pathname === '/api/assessments/submit' && method === 'POST') {
+    const studentUser = session || body?.studentUser || accountService.getAccount(headers['x-student-id'] || body?.studentId);
+    if (!studentUser) {
+      return { status: 401, body: { success: false, error: 'Student authentication required.' } };
+    }
+    const subRes = assessmentManager.submitAttempt(body.attemptId, studentUser, body);
+    return { status: subRes.status || (subRes.success ? 200 : 400), body: subRes };
+  }
+
+  // Live Monitor Telemetry (Faculty only)
+  if (pathname.startsWith('/api/assessments/') && pathname.endsWith('/live-monitor') && method === 'GET') {
+    const parts = pathname.split('/');
+    const assessmentId = parts[3];
+    try {
+      const monitorData = assessmentManager.getLiveMonitor(assessmentId, session);
+      return { status: 200, body: { success: true, monitor: monitorData } };
+    } catch (err) {
+      return { status: 400, body: { success: false, error: err.message } };
+    }
+  }
+
+  // Single assessment lookup
+  if (pathname.startsWith('/api/assessments/') && method === 'GET') {
+    const parts = pathname.split('/');
+    const assessmentId = parts[3];
+    if (assessmentId && assessmentId !== 'faculty' && assessmentId !== 'eligible') {
+      const asg = assessmentManager.getAssessment(assessmentId);
+      if (!asg) {
+        return { status: 404, body: { success: false, error: 'Assessment not found.' } };
+      }
+      const isStudent = session?.role === 'student' || headers['x-user-role'] === 'student';
+      if (isStudent) {
+        const studentUser = session || accountService.getAccount(headers['x-student-id']);
+        const elig = assessmentManager.checkStudentEligibility(asg, studentUser);
+        if (!elig.eligible) {
+          return { status: 403, body: { success: false, error: `Access denied: ${elig.reason}` } };
+        }
+        return { status: 200, body: { success: true, assessment: assessmentManager.sanitizeAssessmentForStudent(asg) } };
+      }
+      return { status: 200, body: { success: true, assessment: asg } };
+    }
   }
 
   // Route not handled here

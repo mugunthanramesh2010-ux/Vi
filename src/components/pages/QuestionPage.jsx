@@ -35,10 +35,12 @@ export default function QuestionPage({
   onSubmitAnswer,
   activeHintCount = 0,
   onDisqualify,
-  sessionQuestionHistory = []
+  sessionQuestionHistory = [],
+  onSelectAcademicTopic,
+  onChangeQuestionIndex
 }) {
-  const isMcqOnly = assignedMode === 'Choice Based (MCQ)' || assignedMode === 'mcq';
-  const isTextOnly = assignedMode === 'Conceptual Text' || assignedMode === 'text';
+  const isMcqOnly = assignedMode === 'Choice Based (MCQ)' || assignedMode === 'mcq' || question?.type === 'mcq';
+  const isTextOnly = assignedMode === 'Conceptual Text' || assignedMode === 'text' || question?.type === 'text';
 
   const [textAnswer, setTextAnswer] = useState('');
   const [selectedOption, setSelectedOption] = useState(null);
@@ -112,46 +114,44 @@ export default function QuestionPage({
   const [behaviorEngine] = useState(() => new BehavioralEngine());
   const timerRef = useRef(null);
 
-  // ANTI-CHEAT: Real event listeners for tab switch, copy, paste
-  useEffect(() => {
-    const handleBlur = () => {
-      setTabSwitches(prev => {
-        const next = prev + 1;
-        soundEffects.playWarning();
-        checkViolationLimit(next, copyAttempts, pasteAttempts, 'Tab switch / Window blur breach');
-        return next;
-      });
-    };
+  // Send audited integrity observation to backend
+  const logIntegrityObservation = (type, details) => {
+    fetch('/api/assessments/integrity-observation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        attemptId: question?.attemptId || 'active_attempt',
+        observation: { type, details, timestamp: Date.now() }
+      })
+    }).catch(() => {});
+  };
 
+  // ASSESSMENT INTEGRITY: Audited event listeners for tab switch, blur, copy, paste
+  useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden) {
-        setTabSwitches(prev => {
-          const next = prev + 1;
-          soundEffects.playWarning();
-          checkViolationLimit(next, copyAttempts, pasteAttempts, 'Tab switch breach');
-          return next;
-        });
+        setTabSwitches(prev => prev + 1);
+        soundEffects.playWarning();
+        logIntegrityObservation('visibility_hidden', 'Browser tab switched or minimized during viva');
       }
+    };
+
+    const handleBlur = () => {
+      logIntegrityObservation('window_blur', 'Browser window lost focus');
     };
 
     const handleCopy = (e) => {
       e.preventDefault();
-      setCopyAttempts(prev => {
-        const next = prev + 1;
-        soundEffects.playWarning();
-        checkViolationLimit(tabSwitches, next, pasteAttempts, 'Copy attempt intercepted');
-        return next;
-      });
+      setCopyAttempts(prev => prev + 1);
+      soundEffects.playWarning();
+      logIntegrityObservation('copy_intercepted', 'Attempted clipboard copy from assessment interface');
     };
 
     const handlePaste = (e) => {
       e.preventDefault();
-      setPasteAttempts(prev => {
-        const next = prev + 1;
-        soundEffects.playWarning();
-        checkViolationLimit(tabSwitches, copyAttempts, next, 'Paste attempt intercepted');
-        return next;
-      });
+      setPasteAttempts(prev => prev + 1);
+      soundEffects.playWarning();
+      logIntegrityObservation('paste_intercepted', 'Attempted clipboard paste into answer field');
     };
 
     const handleGlobalKeyDown = (e) => {
@@ -161,41 +161,27 @@ export default function QuestionPage({
           handleCopy(e);
         } else if (key === 'v') {
           handlePaste(e);
+        } else if (key === 'p') {
+          e.preventDefault();
+          logIntegrityObservation('print_intercepted', 'Attempted browser print dialog');
         }
       }
     };
 
-    window.addEventListener('blur', handleBlur);
     document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('blur', handleBlur);
     document.addEventListener('copy', handleCopy);
     document.addEventListener('paste', handlePaste);
     window.addEventListener('keydown', handleGlobalKeyDown);
 
     return () => {
-      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('copy', handleCopy);
       document.removeEventListener('paste', handlePaste);
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [tabSwitches, copyAttempts, pasteAttempts]);
-
-  // Check if 3 violations reached -> Immediately terminate viva!
-  const checkViolationLimit = (tabs, copies, pastes, triggerReason) => {
-    const total = tabs + copies + pastes;
-    if (total >= 3) {
-      setDisqualificationModal(true);
-      soundEffects.playWarning();
-      setTimeout(() => {
-        if (onDisqualify) {
-          onDisqualify(
-            `Automated Disqualification: 3 Security Violations (${tabs} Tab Switches, ${pastes} Pastes, ${copies} Copies). Reason: ${triggerReason}`,
-            { tabSwitches: tabs, pasteAttempts: pastes, copyAttempts: copies }
-          );
-        }
-      }, 1800);
-    }
-  };
+  }, []);
 
   useEffect(() => {
     setTextAnswer('');
@@ -243,34 +229,49 @@ export default function QuestionPage({
   const questionTitle = question?.questionText || question?.text || 'Explain the conceptual mechanism and governing equations for this topic.';
   const adaptiveNote = question?.adaptiveNote || null;
 
+  const maskedStudentId = 'STU-***' + String(question?.studentRegNo || '04055').slice(-4);
+  const watermarkText = `${maskedStudentId} • ${question?.topic || 'VIVA-EXAM'} • SECURED`;
+
   return (
-    <div className="w-full py-2 px-2 sm:px-4 space-y-6 animate-fade-in text-left">
-      
-      {/* 1. DISQUALIFICATION MODAL (AUTO-TERMINATES ON 3 VIOLATIONS) */}
-      {disqualificationModal && (
-        <div className="fixed inset-0 z-50 bg-[#0F172A]/90 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="max-w-[540px] w-full bg-[#FFF0F0] border-4 border-[#C53030] rounded-3xl p-8 text-center space-y-5 shadow-2xl animate-bounce">
-            <div className="w-20 h-20 rounded-full bg-[#FED7D7] border-2 border-[#C53030] flex items-center justify-center mx-auto text-[#C53030]">
-              <ShieldAlert className="w-12 h-12" />
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-black text-[#C53030] uppercase tracking-wide">
-              VIVA AUTOMATICALLY TERMINATED
-            </h2>
-            <div className="text-base font-bold text-[#742A2A] leading-relaxed">
-              3 Malpractice Violations Detected!
-              <div className="mt-2 text-sm font-mono bg-[#FED7D7] p-3 rounded-xl">
-                • Tab Switches: {tabSwitches}<br />
-                • Clipboard Pastes: {pasteAttempts}<br />
-                • Restricted Copies: {copyAttempts}
-              </div>
-            </div>
-            <div className="p-4 bg-[#C53030] text-white rounded-2xl font-black text-lg">
-              FINAL SCORE: 0 / 100 (DISQUALIFIED)
-            </div>
-            <p className="text-xs text-[#9B2C2C]">
-              Your session has been logged and forwarded directly to the Faculty Portal.
-            </p>
+    <div
+      onContextMenu={(e) => e.preventDefault()}
+      className="w-full py-2 px-2 sm:px-4 space-y-6 animate-fade-in text-left select-none relative"
+    >
+      {/* 0. Print Deterrence Style Block */}
+      <style>{`
+        @media print {
+          body * { display: none !important; }
+          body::after { content: "Examination capture and printing is restricted by academic security policy."; display: block !important; padding: 40px; font-weight: bold; }
+        }
+      `}</style>
+
+      {/* 0b. Non-sensitive, session-specific watermark overlay (Legible, non-obstructive) */}
+      <div
+        className="pointer-events-none fixed inset-0 z-30 select-none overflow-hidden opacity-[0.045] flex flex-wrap items-center justify-around gap-16 p-8"
+        aria-hidden="true"
+      >
+        {Array.from({ length: 12 }).map((_, i) => (
+          <div key={i} className="text-xs font-mono font-bold text-gray-900 rotate-[-22deg] uppercase tracking-widest">
+            {watermarkText}
           </div>
+        ))}
+      </div>
+
+      {/* 1. AUDITED OBSERVATION NOTICE (Observations recorded for staff review, NO false automatic disqualification) */}
+      {totalViolations >= 3 && (
+        <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-900 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-md animate-fade-in">
+          <div className="flex items-center gap-2.5">
+            <ShieldAlert className="w-5 h-5 text-amber-700 shrink-0" />
+            <div>
+              <strong>Audited Integrity Observations Logged:</strong> {tabSwitches} window focus loss(es), {pasteAttempts} paste attempt(s), {copyAttempts} copy attempt(s).
+              <span className="block text-[11px] text-amber-800">
+                These signals are recorded on the server as observations for staff review according to institutional policy. No automatic disqualification.
+              </span>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-md bg-amber-200 text-amber-950 font-mono text-xs font-bold shrink-0">
+            Audit Flagged
+          </span>
         </div>
       )}
 
@@ -390,6 +391,152 @@ export default function QuestionPage({
         </div>
       )}
 
+      {/* Quick Academic Topic Switcher Bar */}
+      <div className="p-3 sm:p-4 rounded-2xl bg-[#FFFCF4] border-2 border-[#E2D3A7] shadow-sm space-y-2">
+        <div className="flex items-center justify-between text-xs font-bold text-[#8B5E34]">
+          <span className="flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+            <Sparkles className="w-4 h-4 text-[#B7791F]" />
+            <span>Universal Topic-Intelligent Engine • Multi-Format Assessment</span>
+          </span>
+          <span className="text-[11px] text-[#2F855A] font-bold">
+            {question?.validation?.valid ? '✓ Subject-Validated Quality Gate' : 'Topic-Grounded Assessment Engine'}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Biotechnology', 'Bioreactor Design', 'Oxygen Transfer', 'mcq')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.concept === 'Oxygen Transfer' && question?.format === 'Theory' && question?.type !== 'text'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            🧪 Biotech: Oxygen Transfer (Theory)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Biotechnology', 'Bioreactor Design', 'Oxygen Transfer', 'numerical')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.format === 'Numerical' && question?.subject === 'Biotechnology'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            🧮 Biotech: OTR Calculation (Numerical)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Biotechnology', 'Bioreactor Design', 'Sterilization', 'mcq')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.concept === 'Sterilization'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            🔬 Biotech: Sterilization (Del Factor)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Control Systems', 'Bode Plot Stability Analysis', 'Gain and Phase Margins', 'diagram')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.subject === 'Control Systems' && question?.format === 'Diagram'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            🎛️ Control: Bode Plot (Diagram)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Communication Engineering', 'Modulation', 'Principles of Modulation', 'numerical')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.subject === 'Communication Engineering'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            📡 ECE: Antenna Sizing (Numerical)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Computer Science', 'Database Normalization', 'Normal Forms and Dependencies', 'mcq')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.subject === 'Computer Science'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            💻 CSE: 3NF vs BCNF (Theory & Scenario)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Linear Algebra', 'Eigenvalues and Eigenvectors', 'Characteristic Equation and Eigenspaces', 'numerical')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.subject === 'Linear Algebra'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            📐 Linear Algebra: Eigenvalues (Numerical)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Mechanical Engineering', 'Heat Transfer', 'Fourier Conduction & Thermal Resistance', 'numerical')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.subject === 'Mechanical Engineering'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            ⚙️ Mech: Heat Conduction (Numerical)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Civil Engineering', 'Structural Mechanics', 'Euler-Bernoulli Beam Theory and Bending Stress', 'theory')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.subject === 'Civil Engineering'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            🏗️ Civil: Beam Theory (Theory)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Renewable Energy Systems', 'Photovoltaic MPPT Controls', 'Perturb and Observe Algorithm', 'mcq')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.subject === 'Renewable Energy Systems'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            🌐 Arbitrary Staff Topic (Universal Engine)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectAcademicTopic && onSelectAcademicTopic('Biotechnology', 'Bioreactor Design', 'Oxygen Transfer', 'text')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              question?.type === 'text' && question?.concept === 'Oxygen Transfer'
+                ? 'bg-[#B7791F] text-white border-[#B7791F] shadow-xs'
+                : 'bg-[#FFF8E8] text-[#8B5E34] border-[#E2D3A7] hover:bg-[#FFF3D6]'
+            }`}
+          >
+            📝 Biotech: Descriptive Rubric Mode
+          </button>
+        </div>
+      </div>
+
       {/* 3. TOP PIPELINE HEADER (Clean, with Telemetry Icon Button) */}
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-[#FFFCF4] border-2 border-[#E2D3A7] shadow-sm">
         
@@ -458,9 +605,83 @@ export default function QuestionPage({
             </span>
           </div>
 
+          {/* Subject Context & Format Badges */}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <span className="px-3 py-1 rounded-lg bg-[#FFF3D6] border border-[#E2D3A7] text-xs font-bold text-[#8B5E34]">
+              Subject: {question?.subject || 'Academic Discipline'}
+            </span>
+            <span className="px-3 py-1 rounded-lg bg-[#FFF3D6] border border-[#E2D3A7] text-xs font-bold text-[#8B5E34]">
+              Topic: {question?.topic || 'Syllabus Topic'}
+            </span>
+            <span className="px-3 py-1 rounded-lg bg-[#E6F4EA] border border-[#A8DAB5] text-xs font-bold text-[#2F855A]">
+              Concept: {question?.concept || 'Assigned Concept'}
+            </span>
+            {question?.format && (
+              <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${
+                question.format === 'Numerical'
+                  ? 'bg-[#FEFCBF] border-[#D69E2E] text-[#B7791F]'
+                  : question.format === 'Diagram'
+                  ? 'bg-[#EBF8FF] border-[#3182CE] text-[#2B6CB0]'
+                  : question.format === 'Scenario'
+                  ? 'bg-[#FEEBC8] border-[#DD6B20] text-[#C05621]'
+                  : question.format === 'Comparison'
+                  ? 'bg-[#E9D8FD] border-[#805AD5] text-[#6B46C1]'
+                  : 'bg-[#EDF2F7] border-[#CBD5E0] text-[#4A5568]'
+              }`}>
+                Format: {question.format}
+              </span>
+            )}
+            {question?.learningObjective && (
+              <span className="px-3 py-1 rounded-lg bg-[#EBF8FF] border border-[#BEE3F8] text-xs font-semibold text-[#2B6CB0]">
+                LO: {question.learningObjective}
+              </span>
+            )}
+          </div>
+
           <h2 className="text-2xl sm:text-3xl font-extrabold text-[#2D3748] leading-relaxed tracking-tight">
             {questionTitle}
           </h2>
+
+          {/* Academic Vector SVG Diagram Region (Rendered only when question requires visual) */}
+          {question?.diagramSvg && (
+            <div className="p-4 sm:p-6 rounded-2xl bg-[#FFFDF8] border-2 border-[#E2D3A7] shadow-sm flex flex-col items-center gap-3">
+              <div className="flex items-center justify-between w-full border-b border-[#E2D3A7] pb-2 text-xs font-bold text-[#8B5E34]">
+                <span className="flex items-center gap-1.5 uppercase tracking-wide">
+                  <Layers className="w-4 h-4 text-[#B7791F]" />
+                  <span>Academic Reference Diagram</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-[#EBF8FF] text-[#2B6CB0] border border-[#BEE3F8] text-[10px] font-bold">
+                  Vector SVG • Authentic Data
+                </span>
+              </div>
+              <div
+                className="w-full flex items-center justify-center overflow-x-auto py-2"
+                dangerouslySetInnerHTML={{ __html: question.diagramSvg }}
+              />
+              {question?.diagramCaption && (
+                <p className="text-xs text-[#718096] italic text-center max-w-lg">
+                  {question.diagramCaption}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Numerical Input Parameters Panel (When question requires calculations) */}
+          {question?.numericalDetails?.givenParameters && (
+            <div className="p-3 sm:p-4 rounded-xl bg-[#FFF8E8] border border-[#E2D3A7] space-y-1.5">
+              <span className="text-xs font-bold text-[#8B5E34] uppercase tracking-wide flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-[#B7791F]" />
+                <span>Given Parameters & Operating Values:</span>
+              </span>
+              <div className="flex flex-wrap gap-2 text-xs font-mono font-semibold text-[#2D3748]">
+                {Object.entries(question.numericalDetails.givenParameters).map(([paramKey, val]) => (
+                  <span key={paramKey} className="px-2.5 py-1 rounded-lg bg-white border border-[#E2D3A7] shadow-2xs">
+                    <strong>{paramKey}:</strong> {val}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {adaptiveNote && (
             <div className="pt-2 flex items-center gap-2 text-xs font-bold text-[#2F855A]">

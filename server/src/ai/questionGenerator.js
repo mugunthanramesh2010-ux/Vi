@@ -7,12 +7,24 @@ import { modelRouter } from './modelRouter.js';
 import { TASK_TYPES } from './taskClassifier.js';
 import { outputValidator } from './outputValidator.js';
 import { QUESTION_TYPES, DIFFICULTY_LEVELS } from './questionSchemas.js';
+import { GenerateAcademicQuestionPackage } from '../../../src/services/academicAssessmentEngine.js';
+import { multiModelOrchestrator } from './orchestrator/multiModelOrchestrator.js';
 
 export class QuestionGenerator {
   /**
    * Generates a grounded, multimodal question
    */
   async generateQuestion(context, options = {}) {
+    // 0. Try Multi-Model Defensible Ensemble if enabled
+    try {
+      const ensembleQ = await multiModelOrchestrator.generateEnsembleQuestion(context, options);
+      if (ensembleQ) {
+        return ensembleQ;
+      }
+    } catch (e) {
+      // Continue to local router / procedural fallback
+    }
+
     const {
       subject,
       topic,
@@ -116,6 +128,47 @@ Return STRICT JSON:
     const isNumerical = questionType === 'numerical';
     const isCircuit = questionType === 'circuit_analysis';
     const isCaseStudy = questionType === 'case_study';
+    const isMcq = questionType === 'mcq';
+
+    // 1. Resolve through Academic Assessment Registry first
+    const acadPkg = GenerateAcademicQuestionPackage({
+      subjectName: cleanSubj,
+      topic: cleanTopic,
+      concept: conceptId || cleanTopic,
+      questionType: questionType || 'conceptual',
+      difficulty: targetDifficulty || 'Intermediate',
+      academicLevel: 'Undergraduate'
+    });
+
+    if (acadPkg && acadPkg.verifiedReference) {
+      return {
+        id: acadPkg.id || `q_proc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        subject: acadPkg.subject,
+        topic: acadPkg.topic,
+        conceptId: acadPkg.concept,
+        questionText: acadPkg.questionText,
+        text: acadPkg.questionText,
+        type: acadPkg.type,
+        questionType: acadPkg.questionType,
+        difficulty: acadPkg.difficulty,
+        bloomLevel: acadPkg.bloomLevel,
+        options: acadPkg.options,
+        correctIndex: acadPkg.correctIndex,
+        modelAnswer: acadPkg.modelAnswer,
+        explanation: acadPkg.explanation,
+        referenceEvidence: referenceEvidence || [],
+        sourceType: 'registered_academic_curriculum',
+        requiredAnswerConcepts: Object.values(acadPkg.rubric || {}),
+        rubric: acadPkg.rubric,
+        hints: acadPkg.hints,
+        expectedKeywords: acadPkg.expectedKeywords,
+        telemetry: {
+          provider: 'academic_assessment_engine',
+          fallbackUsed: true,
+          durationMs: 2
+        }
+      };
+    }
 
     const textToMatch = `${cleanSubj} ${cleanTopic}`.toLowerCase();
     const isCS = /algorithm|sort|quick|tree|graph|operating system|paging|memory|deadlock|process|cpu|network|tcp|database|sql|code|software|compiler|data structure/i.test(textToMatch);
@@ -276,19 +329,13 @@ Return STRICT JSON:
         `Hint 4: Verify whether the dimension of the null space (geometric multiplicity) equals algebraic multiplicity.`
       ];
     } else {
-      qText = `Critically analyze the theoretical principles and operational mechanisms governing ${cleanTopic}. What fundamental governing equations and boundary conditions constrain this system?`;
-      expectedKeywords.push(cleanTopic.toLowerCase(), 'principle', 'mechanism', 'boundary', 'efficiency');
-      rubric = {
+      qText = acadPkg.questionText;
+      expectedKeywords.push(cleanTopic.toLowerCase(), ...(acadPkg.expectedKeywords || []));
+      rubric = acadPkg.rubric || {
         criterion1: `Formulate core principles and definitions of ${cleanTopic}`,
-        criterion2: `Demonstrate governing relations and cause-effect interactions`,
-        criterion3: `Evaluate operational limits, practical tradeoffs, and boundary constraints`
+        criterion2: `Demonstrate governing relations and cause-effect interactions`
       };
-      hints = [
-        `Hint 1: State the foundational academic definition and primary variables of ${cleanTopic}.`,
-        `Hint 2: Identify the governing physical, mathematical, or computational relationship.`,
-        `Hint 3: Examine how varying external constraints or inputs alters system equilibrium.`,
-        `Hint 4: Synthesize critical trade-offs, units of measure, and failure limits.`
-      ];
+      hints = acadPkg.hints;
     }
 
     const question = {
@@ -298,10 +345,14 @@ Return STRICT JSON:
       conceptId: conceptId || `${cleanSubj}_${cleanTopic}`.toUpperCase().replace(/[^A-Z0-9]/g, '_'),
       questionText: qText,
       text: qText,
-      type: 'text',
+      type: isMcq ? 'mcq' : 'text',
       questionType: questionType || QUESTION_TYPES.CONCEPTUAL,
       difficulty: targetDifficulty || DIFFICULTY_LEVELS.MODERATE,
       bloomLevel: isDerivation ? 'Analysis' : isNumerical ? 'Application' : 'Understanding',
+      options: isMcq ? acadPkg.options : null,
+      correctIndex: isMcq ? acadPkg.correctIndex : null,
+      modelAnswer: isMcq ? (acadPkg.options ? acadPkg.options[acadPkg.correctIndex] : null) : (acadPkg.modelAnswer || qText),
+      explanation: acadPkg.explanation,
       mathBlock,
       referenceEvidence: referenceEvidence || [],
       sourceType: referenceEvidence?.length > 0 ? 'reference_grounded' : 'offline_procedural_ontology',

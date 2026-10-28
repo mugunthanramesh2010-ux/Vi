@@ -1,5 +1,6 @@
 import React from 'react';
 import { HelpCircle, ChevronRight, BrainCircuit, ShieldAlert } from 'lucide-react';
+import { generateAdaptiveHint } from '../../services/topicMasteryEngine';
 
 export default function ProgressiveHintEngine({
   isOpen,
@@ -60,6 +61,13 @@ export default function ProgressiveHintEngine({
   const currentHint = hintTiers[effectiveLevel - 1] || hintTiers[0];
   const isMaxLevel = effectiveLevel >= 4;
 
+  const diagnosedMisconceptions = adaptiveEngine?.masteryModel?.diagnosedMisconceptions || [];
+  const displayHintText = generateAdaptiveHint(
+    { ...question, hints: safeHints },
+    effectiveLevel,
+    diagnosedMisconceptions
+  ) || currentHint.description;
+
   return (
     <div className="fixed inset-0 z-50 bg-[#2D3748]/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
       <div className="ent-card max-w-lg w-full bg-[#FFFCF4] border-[#E2D3A7] p-6 sm:p-8 space-y-6 shadow-[0px_12px_32px_rgba(183,121,31,0.15)]">
@@ -117,7 +125,7 @@ export default function ProgressiveHintEngine({
           </div>
 
           <p className="text-base text-[#2D3748] font-semibold leading-relaxed">
-            {currentHint.description}
+            {displayHintText}
           </p>
 
           <div className="pt-2 flex items-center gap-1.5 text-[11px] text-[#718096]">

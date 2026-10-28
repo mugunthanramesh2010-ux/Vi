@@ -688,7 +688,7 @@ export function generateUniversalTopicModel(rawTopic, domainHint = 'Universal Do
       prerequisites: [
         {
           id: 'prereq_1',
-          name: `Foundational Axioms of ${words[0] || 'Core Subject'}`,
+          name: `Foundational Principles of ${words[0] || 'Core Subject'}`,
           level: 'Fundamental',
           desc: `Underlying mathematical, empirical, or theoretical tenets required before analyzing ${cleanTopic}.`
         },

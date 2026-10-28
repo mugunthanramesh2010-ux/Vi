@@ -60,20 +60,83 @@ export class OutputValidator {
       checks.reasons.push('Model output contains unsafe scripts or dangerous markup.');
     }
 
-    // 5. Topic Grounding Check: Topic must be relevant
+    // 5. Topic Grounding & Cross-Discipline Quarantine Checks
     const topic = String(context.topic || '').toLowerCase();
+    const subject = String(context.subject || '').toLowerCase();
+    const qLower = currentText.toLowerCase();
+
+    // Check banned inflated phrasing
+    if (currentText.includes('Foundational Principles, Definitions & Structural Axioms')) {
+      checks.reasons.push('Question contains banned padding phrase: "Foundational Principles, Definitions & Structural Axioms".');
+    }
+    if (qLower.includes('core operational mechanism and governing significance')) {
+      checks.reasons.push('Question contains banned template phrase: "core operational mechanism and governing significance".');
+    }
+    if (qLower.includes('core theoretical framework')) {
+      checks.reasons.push('Question contains banned template phrase: "Core Theoretical Framework".');
+    }
+    if (qLower.includes('operational purpose and governing significance')) {
+      checks.reasons.push('Question contains banned template phrase: "Operational purpose and governing significance".');
+    }
+    if (currentText.includes('Universal Discipline')) {
+      checks.reasons.push('Question contains banned placeholder: "Universal Discipline".');
+    }
+
+    // Cross-discipline quarantine checks
+    if ((subject.includes('biotechnology') || topic.includes('bioreactor') || topic.includes('oxygen transfer')) &&
+        (qLower.includes('electric vehicle') || qLower.includes('ev battery') || qLower.includes('powertrain') || qLower.includes('regenerative braking') || qLower.includes('inverter') || qLower.includes('motor drive') || qLower.includes('internal combustion') || qLower.includes('internet') || qLower.includes('tcp/ip') || qLower.includes('routing protocol') || qLower.includes('packet switching'))) {
+      checks.reasons.push('Cross-discipline violation: Unrelated Internet, networking, or automotive question rejected for Biotechnology / Oxygen Transfer schedule.');
+    }
+    if (subject.includes('biotechnology') && (qLower.includes('nuclear') || qLower.includes('radioactive'))) {
+      checks.reasons.push('Cross-discipline violation: Biotechnology question discusses unrelated nuclear physics.');
+    }
+
+    // 6. MCQ Quality Controls
+    if (question.type === 'mcq') {
+      if (!Array.isArray(question.options) || question.options.length !== 4) {
+        checks.reasons.push(`MCQ must have exactly 4 options (found ${question.options?.length || 0}).`);
+      } else {
+        const uniqueOpts = new Set(question.options.map(o => String(o).trim().toLowerCase()));
+        if (uniqueOpts.size !== question.options.length) {
+          checks.reasons.push('MCQ contains duplicate options.');
+        }
+
+        question.options.forEach((opt, idx) => {
+          const oLower = String(opt).toLowerCase();
+          if (oLower.includes('infinite power amplification') || oLower.includes('zero-loss infinite power')) {
+            checks.reasons.push(`Option ${idx + 1} contains banned absurd claim: "infinite power amplification".`);
+          }
+          if (oLower.includes('arbitrary empirical approximation')) {
+            checks.reasons.push(`Option ${idx + 1} contains banned generic template phrasing.`);
+          }
+          if (oLower.includes('eliminates the requirement for boundary conditions') || oLower.includes('eliminating boundary conditions')) {
+            checks.reasons.push(`Option ${idx + 1} contains banned generic distractor phrasing.`);
+          }
+        });
+
+        if (typeof question.correctIndex !== 'number' || question.correctIndex < 0 || question.correctIndex >= question.options.length) {
+          checks.reasons.push(`Invalid correctIndex: ${question.correctIndex}.`);
+        }
+
+        if (question.explanation && typeof question.correctIndex === 'number') {
+          const expLower = question.explanation.toLowerCase();
+          if (question.correctIndex === 0 && (expLower.includes('option b is correct') || expLower.includes('option c is correct') || expLower.includes('option d is correct'))) {
+            checks.reasons.push('Contradictory explanation: Explanation indicates an option that contradicts correctIndex.');
+          }
+        }
+      }
+    }
+
     if (topic && topic.length > 3) {
-      const qLower = currentText.toLowerCase();
       // Check if topic or its principal root word is reflected in question, concept, or expected keywords
       const topicWords = topic.split(/\s+/).filter(w => w.length > 3);
       const matchedWord = topicWords.some(w => qLower.includes(w) || (question.expectedKeywords || []).some(k => String(k).toLowerCase().includes(w)));
       if (!matchedWord && !context.referenceEvidence?.length) {
-        // Warning, might be loosely grounded
         checks.reasons.push(`Question lacks direct lexical alignment with target topic "${context.topic}".`);
       }
     }
 
-    const isValid = checks.schemaValid && checks.antiLeakPassed && checks.notDuplicate && checks.safeRendering;
+    const isValid = checks.schemaValid && checks.antiLeakPassed && checks.notDuplicate && checks.safeRendering && checks.reasons.length === 0;
     return {
       isValid,
       checks,

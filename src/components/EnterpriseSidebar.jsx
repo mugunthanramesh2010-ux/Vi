@@ -30,16 +30,17 @@ export default function EnterpriseSidebar({
   const studentNav = [
     { id: 'student-dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'my-assignments', label: 'Assignments', icon: BookOpen },
-    { id: 'self-learning', label: 'Viva Arena', icon: Cpu },
+    { id: 'self-learning', label: 'Viva Analyzer X', icon: Cpu },
     { id: 'knowledge-map', label: 'Knowledge Map', icon: Layers },
     { id: 'final-result', label: 'Results & Reports', icon: FileSpreadsheet },
     { id: 'profile', label: 'My Profile', icon: User }
   ];
 
-  // Faculty Navigation (7 main items)
+  // Faculty Navigation (8 main items)
   const facultyNav = [
     { id: 'faculty-dashboard', label: 'Faculty Dashboard', icon: LayoutDashboard },
     { id: 'create-assignment', label: 'Create Assignment', icon: PlusCircle },
+    { id: 'live-monitor', label: 'Live Viva Monitor', icon: BarChart3 },
     { id: 'faculty-students', label: 'Student Cohort', icon: Users },
     { id: 'faculty-results', label: 'Exam Results', icon: FileSpreadsheet },
     { id: 'security-analytics', label: 'Security & Telemetry', icon: ShieldCheck },

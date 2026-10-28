@@ -147,8 +147,8 @@ export default function StudentDashboardPage({ currentUser, adaptiveEngine, topi
             onClick={() => onNavigate('self-learning')}
             className="btn-primary h-[48px] min-w-0 px-6 text-sm"
           >
-            <Cpu className="w-4 h-4 mr-1 text-[#FFF3D6]" />
-            Self Learning
+            <Sparkles className="w-4 h-4 mr-1 text-[#FFF3D6]" />
+            Viva Analyzer X Studio
           </button>
           <button
             onClick={() => onNavigate('my-assignments')}

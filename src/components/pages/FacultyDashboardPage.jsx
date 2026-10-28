@@ -125,8 +125,15 @@ export default function FacultyDashboardPage({ currentUser, onNavigate, onOpenRe
             Create Assignment
           </button>
           <button
+            onClick={() => onNavigate('live-monitor')}
+            className="btn-secondary h-[48px] min-w-0 px-6 text-sm font-bold border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100"
+          >
+            <Activity className="w-4 h-4 mr-1 text-amber-700" />
+            Live Viva Monitor
+          </button>
+          <button
             onClick={() => onNavigate('faculty-results')}
-            className="btn-secondary h-[48px] min-w-0 px-6 text-sm"
+            className="btn-outline h-[48px] min-w-0 px-6 text-sm"
           >
             <FileSpreadsheet className="w-4 h-4 mr-1" />
             View Results
@@ -184,13 +191,21 @@ export default function FacultyDashboardPage({ currentUser, onNavigate, onOpenRe
                 Multi-PC LAN Exam Hosting Controller
               </h2>
               <p className="text-xs sm:text-sm text-[#718096]">
-                Run faculty portal on this PC; allow 100+ student PCs on the same Wi-Fi / college LAN to attend simultaneously
+                Authoritative server delivery: allow 100+ student PCs and mobile browsers on the LAN to attend simultaneously
               </p>
             </div>
           </div>
-          <span className="px-3.5 py-1.5 rounded-full bg-[#E6F4EA] border border-[#A8DAB5] text-[#2F855A] font-extrabold text-xs">
-            ● LAN Server Active (0.0.0.0:5173)
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('live-monitor')}
+              className="px-4 py-2 bg-[#B7791F] hover:bg-[#975A16] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              <Activity className="w-3.5 h-3.5" /> Launch Live Monitor
+            </button>
+            <span className="px-3.5 py-1.5 rounded-full bg-[#E6F4EA] border border-[#A8DAB5] text-[#2F855A] font-extrabold text-xs">
+              ● Server Active
+            </span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -200,27 +215,27 @@ export default function FacultyDashboardPage({ currentUser, onNavigate, onOpenRe
               http://localhost:5173/ <span className="text-xs font-sans text-[#718096] block sm:inline">(or http://&lt;Local_IP&gt;:5173/)</span>
             </div>
             <p className="text-[11px] text-[#718096]">
-              Share this address with students in the computer lab or lecture hall.
+              Share this address with students in the lab or lecture hall. Staff PC does not need to stay on.
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#FFFCF4] border border-[#E2D3A7] space-y-2">
-            <span className="text-xs font-bold text-[#8B5E34] uppercase">2. Class & Section Targeting</span>
+            <span className="text-xs font-bold text-[#8B5E34] uppercase">2. Class & Section Enforcement</span>
             <div className="text-sm font-extrabold text-[#2D3748]">
               Restricted to Enrolled Cohort
             </div>
             <p className="text-[11px] text-[#718096]">
-              When you publish an assignment for <strong>Year 3, Section A</strong>, only students registered in that class can access and attend that viva.
+              When you publish for <strong>Year 3, Section A</strong>, only students enrolled in that class and section can access the questions.
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-[#FFFCF4] border border-[#E2D3A7] space-y-2">
-            <span className="text-xs font-bold text-[#8B5E34] uppercase">3. Real-Time Anti-Cheat Defense</span>
-            <div className="text-sm font-extrabold text-[#C53030]">
-              Auto-Close on 3 Violations
+            <span className="text-xs font-bold text-[#8B5E34] uppercase">3. Deterrence & Audited Signals</span>
+            <div className="text-sm font-extrabold text-[#2F855A]">
+              Audited Telemetry (No False Disqualification)
             </div>
             <p className="text-[11px] text-[#718096]">
-              If any student switches tabs or attempts copy/paste 3 times, their viva is immediately terminated and scored as 0.
+              Non-sensitive watermarks, disabled copy/print, and audited visibility logs. Integrity events are observations for staff review.
             </p>
           </div>
         </div>

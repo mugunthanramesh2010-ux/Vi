@@ -2,6 +2,24 @@
 // Dynamic Difficulty, Anti-Boredom, Multi-Level Hints, Learning DNA, Cognitive Twin,
 // Forgetting Curve, Explainable AI, and Multi-Agent Collaboration.
 
+import {
+  StudentMasteryModel,
+  classifyAnswerEvaluation,
+  selectAdaptiveNextQuestion,
+  generateAdaptiveHint,
+  getTopicKnowledgeMap,
+  getConceptDependencyGraph
+} from './topicMasteryEngine.js';
+
+export {
+  StudentMasteryModel,
+  classifyAnswerEvaluation,
+  selectAdaptiveNextQuestion,
+  generateAdaptiveHint,
+  getTopicKnowledgeMap,
+  getConceptDependencyGraph
+};
+
 export class AdaptiveEngine {
   constructor(initialDna, initialTwin) {
     this.dna = initialDna || {
@@ -33,6 +51,9 @@ export class AdaptiveEngine {
     this.hintsUsedInCurrentQuestion = 0;
     this.questionHistory = [];
     this.boredomCounter = 0;
+
+    // Calibrated Bayesian Student Mastery Model
+    this.masteryModel = new StudentMasteryModel();
 
     // Multi-Agent Pipeline State
     this.agentStatuses = {
@@ -103,7 +124,30 @@ export class AdaptiveEngine {
   // Universal Conceptual Evaluator - Evaluates either Choice-Based MCQ or Text Answer
   evaluateConceptualAnswer(userAnswer, question, questionIndex = 0, totalQuestions = 10) {
     if (!question) {
-      return { score: 75, feedback: 'Conceptual response received and logged.', status: 'Correct' };
+      return { score: 75, feedback: 'Conceptual response received and logged.', status: 'Correct', tier: 'CORRECT_SOUND_REASONING', diagnosedMisconception: null };
+    }
+
+    const classified = classifyAnswerEvaluation(
+      userAnswer,
+      question,
+      this.hintsUsedInCurrentQuestion || 0,
+      25
+    );
+
+    if (this.masteryModel) {
+      const cId = question.conceptId || question.concept || 'general_concept';
+      const cName = question.concept || question.conceptId || 'Core Concept';
+      this.masteryModel.updateMasteryEvidence({
+        conceptId: cId,
+        conceptName: cName,
+        isCorrect: classified.isCorrect,
+        reasoningTier: classified.tier,
+        score: classified.score,
+        hintsUsed: this.hintsUsedInCurrentQuestion || 0,
+        timeSpentSeconds: 25,
+        format: question.format || (question.type === 'numerical' ? 'Numerical' : 'Theory'),
+        diagnosedMisconception: classified.diagnosedMisconception
+      });
     }
 
     // Determine if answering via MCQ index or option choice
@@ -113,7 +157,7 @@ export class AdaptiveEngine {
       : [
           `Option A: Primary operational mechanism governing topic dynamics`,
           `Option B: Secondary boundary condition with non-linear feedback characteristics`,
-          `Option C: Dynamic equilibrium state established under static load`,
+          `Option C: Secondary condition or non-applicable parameter`,
           `Option D: Parametric degradation observed during transient transitions`
         ];
 
@@ -147,6 +191,8 @@ export class AdaptiveEngine {
         score,
         isCorrect,
         status: isCorrect ? 'Correct' : 'Needs Improvement',
+        tier: classified.tier,
+        diagnosedMisconception: classified.diagnosedMisconception,
         feedback,
         conceptMatched: isCorrect ? [selectedOpt] : [],
         missingConcepts: isCorrect ? [] : [correctOpt]
@@ -177,6 +223,8 @@ export class AdaptiveEngine {
       ...textResult,
       score: finalScore,
       isCorrect: finalScore >= 80,
+      tier: classified.tier,
+      diagnosedMisconception: classified.diagnosedMisconception,
       status: finalStatus
     };
   }
@@ -271,16 +319,12 @@ export class AdaptiveEngine {
     return {
       score,
       isCorrect,
+      status: score >= 80 ? 'Correct' : score >= 65 ? 'Partially Correct' : 'Needs Improvement',
       feedback,
       conceptMatched: matched,
       missingConcepts: missing,
       masteryIncrement: score >= 70 ? 1 : 0
     };
-  }
-
-  // Alias for backward compatibility with App.jsx
-  evaluateConceptualAnswer(userAnswer, question) {
-    return this.evaluateTextAnswer(userAnswer, question);
   }
 
   // Evaluate MCQ Answer

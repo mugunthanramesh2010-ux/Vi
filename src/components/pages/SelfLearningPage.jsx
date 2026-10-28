@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Cpu, Search, Sparkles, BookOpen, Layers, ShieldCheck, CheckCircle2, Zap, Brain, ArrowRight, RotateCcw, Loader2 } from 'lucide-react';
 import { generateUniversalTopicModel, generateUniversalTopicModelAsync } from '../../services/universalOntology';
 import { checkOllamaAvailability } from '../../services/aiQuestionService';
+import VivaAnalyzerX from '../VivaAnalyzerX';
 
 export default function SelfLearningPage({ onTopicSelected }) {
   const [topicInput, setTopicInput] = useState('');
@@ -9,6 +10,7 @@ export default function SelfLearningPage({ onTopicSelected }) {
   const [ollamaStatus, setOllamaStatus] = useState({ available: false, models: [], activeModel: null });
   const [selectedModel, setSelectedModel] = useState('llama3.2:1b');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [activeViewMode, setActiveViewMode] = useState('analyzer_x');
 
   useEffect(() => {
     checkOllamaAvailability().then(res => {
@@ -95,14 +97,46 @@ export default function SelfLearningPage({ onTopicSelected }) {
           <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#FFF3D6] border border-[#E2D3A7] text-xs font-bold text-[#8B5E34]">
             <Sparkles className="w-4 h-4 text-[#B7791F]" />
             <span>
-              {ollamaStatus.available ? `Hidden AI: Ollama (${ollamaStatus.activeModel})` : 'Offline Domain Engine Active'}
+              {ollamaStatus.available ? 'Subject Intelligence Engine Active' : 'Offline Domain Engine Active'}
             </span>
           </div>
         </div>
       </div>
 
-      {/* FULL-SCREEN 12-COLUMN WIDESCREEN GRID - Covers 100% of Width */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start w-full">
+      {/* View Mode Toggle: Viva Analyzer X Studio vs Rapid Topic Presets */}
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-[#E2D3A7] pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveViewMode('analyzer_x')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeViewMode === 'analyzer_x'
+              ? 'bg-[#B7791F] text-white shadow-md'
+              : 'bg-[#FFF8E8] text-[#8B5E34] border border-[#E2D3A7] hover:bg-[#FFF3D6]'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>VIVA ANALYZER X (Subject & Concept Grounded Studio)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveViewMode('rapid_presets')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeViewMode === 'rapid_presets'
+              ? 'bg-[#B7791F] text-white shadow-md'
+              : 'bg-[#FFF8E8] text-[#8B5E34] border border-[#E2D3A7] hover:bg-[#FFF3D6]'
+          }`}
+        >
+          <Cpu className="w-4 h-4" />
+          <span>Rapid Topic Presets</span>
+        </button>
+      </div>
+
+      {activeViewMode === 'analyzer_x' ? (
+        <VivaAnalyzerX onStartViva={onTopicSelected} />
+      ) : (
+        /* FULL-SCREEN 12-COLUMN WIDESCREEN GRID - Covers 100% of Width */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start w-full">
         
         {/* LEFT COLUMN (7 of 12 columns): Main Knowledge Domain Input Card */}
         <div className="lg:col-span-7 space-y-6">
@@ -208,20 +242,20 @@ export default function SelfLearningPage({ onTopicSelected }) {
               </div>
             </div>
 
-            {/* Local Inference Model Selector (Ollama / Local Runtime / Dynamic Engine) */}
+            {/* Local Inference Model Selector (Dynamic Reasoning Engine) */}
             <div className="space-y-2.5 text-left pt-2 border-t border-[#E2D3A7]">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-extrabold text-[#8B5E34] uppercase tracking-wider flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-[#B7791F]" />
-                  <span>AI Inference Engine (100% Offline Local Model):</span>
+                  <span>Academic Reasoning Engine Profile:</span>
                 </label>
                 <span className="text-[11px] font-bold text-[#2F855A] bg-[#E6F4EA] px-2 py-0.5 rounded-md border border-[#A8DAB5]">
-                  {ollamaStatus.available ? 'Ollama Server Connected' : 'Offline Engine Ready'}
+                  {ollamaStatus.available ? 'Local Intelligence Engine Active' : 'Domain Ontology Active'}
                 </span>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {(ollamaStatus.models && ollamaStatus.models.length > 0 ? ollamaStatus.models : ['llama3.2:1b', 'llama3.2:latest', 'llama3:latest']).map((m) => (
+                {(ollamaStatus.models && ollamaStatus.models.length > 0 ? ollamaStatus.models : ['Standard Reasoning Engine', 'Advanced Academic Engine', 'Deep Analytical Engine']).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -232,13 +266,13 @@ export default function SelfLearningPage({ onTopicSelected }) {
                         : 'bg-[#FFF8E8] text-[#4A5568] border-[#E2D3A7] hover:border-[#B7791F]'
                     }`}
                   >
-                    <span>{m}</span>
+                    <span>{m.replace(/^ollama[\/:]/i, '')}</span>
                     {selectedModel === m && <CheckCircle2 className="w-3 h-3 text-[#FFF3D6]" />}
                   </button>
                 ))}
               </div>
               <p className="text-[11px] text-[#718096]">
-                Questions, options, answers, and 4-tier progressive hints are synthesized instantly without transmitting any content to cloud services.
+                Questions, options, answers, and 4-tier progressive hints are synthesized instantly without transmitting any content to external cloud services.
               </p>
             </div>
 
@@ -254,7 +288,7 @@ export default function SelfLearningPage({ onTopicSelected }) {
                 {isGenerating ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin text-[#FFF3D6]" />
-                    <span>Synthesizing Exam with {selectedModel}...</span>
+                    <span>Generating Grounded Questions...</span>
                   </>
                 ) : (
                   <>
@@ -353,6 +387,7 @@ export default function SelfLearningPage({ onTopicSelected }) {
         </div>
 
       </div>
+      )}
 
     </div>
   );

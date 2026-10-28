@@ -13,6 +13,9 @@ const OLLAMA_ENDPOINT = 'http://localhost:11434';
 const DEFAULT_LOCAL_MODEL = 'llama3.2:1b';
 
 import { DOMAIN_QUESTION_BANKS } from './domainQuestionBanks.js';
+import { UNIVERSAL_SUBJECTS, autoDetectConcepts, generateConceptGroundedQuestions } from './subjectConceptOntology.js';
+
+export { UNIVERSAL_SUBJECTS, autoDetectConcepts, generateConceptGroundedQuestions };
 
 // Check if local Ollama service is reachable (via server proxy or direct localhost)
 export async function checkOllamaAvailability() {
@@ -26,7 +29,7 @@ export async function checkOllamaAvailability() {
           available: true,
           models: data.models || [],
           activeModel: data.activeModel || DEFAULT_LOCAL_MODEL,
-          provider: 'ollama'
+          provider: 'local_engine'
         };
       }
     }
@@ -51,7 +54,7 @@ export async function checkOllamaAvailability() {
                           models.find(m => m.includes('llama')) ||
                           models[0] ||
                           DEFAULT_LOCAL_MODEL;
-      return { available: true, models, activeModel, provider: 'ollama' };
+      return { available: true, models, activeModel, provider: 'local_engine' };
     }
   } catch (e) {
     // Ollama not currently reachable
@@ -70,10 +73,12 @@ export async function generateQuestionsWithAI(topic, options = {}) {
     apiBaseUrl = 'https://api.openai.com/v1',
     documentContext = '',
     bloomLevel = 'Adaptive',
-    facultyInstructions = ''
+    facultyInstructions = '',
+    subject = ''
   } = options;
 
   const targetCount = Math.min(50, Math.max(2, parseInt(count, 10) || 10));
+  const cleanSubject = (subject || options.rawSubject || options.subjectName || '').trim();
 
   // 1. Call Backend Unified AI Proxy (/api/ai/generate handles both Ollama and OpenAI cleanly)
   try {
@@ -87,6 +92,7 @@ export async function generateQuestionsWithAI(topic, options = {}) {
       body: JSON.stringify({
         provider,
         topic,
+        subject: cleanSubject,
         count: targetCount,
         model: model || (apiKey ? 'gpt-4o-mini' : DEFAULT_LOCAL_MODEL),
         apiKey,
@@ -170,7 +176,7 @@ Format your response STRICTLY as valid JSON:
   }
 
   // 3. Fallback to instant varying dynamic subject ontology
-  return generateOfflineDeepQuestions(topic, targetCount, documentContext);
+  return generateOfflineDeepQuestions(topic, targetCount, documentContext, cleanSubject);
 }
 
 // Backward compatibility alias
@@ -1927,7 +1933,7 @@ const SUBJECT_DOMAINS = {
 };
 
 // Generate offline deep questions matching any topic
-export function generateOfflineDeepQuestions(rawTopic, targetCount = 10, documentText = '') {
+export function generateOfflineDeepQuestions(rawTopic, targetCount = 10, documentText = '', rawSubject = '') {
   const cleanTopic = (rawTopic || 'Subject').trim();
   const lower = cleanTopic.toLowerCase();
   const count = Math.min(50, Math.max(3, targetCount));
@@ -1990,7 +1996,7 @@ export function generateOfflineDeepQuestions(rawTopic, targetCount = 10, documen
         'In terms of mathematical derivation and limiting behavior, evaluate',
         'Under non-ideal physical implementation or edge failure modes, analyze',
         'Compare the computational or experimental efficiency of alternative approaches to',
-        'Synthesize the governing axioms, assumptions, and critical design rules for'
+        'Examine the foundational state transitions and design criteria for'
       ];
 
       let variantCounter = 0;
@@ -2016,322 +2022,38 @@ export function generateOfflineDeepQuestions(rawTopic, targetCount = 10, documen
     return qList.slice(0, count);
   }
 
-  // 3. UNIVERSAL DYNAMIC SUBJECT SYNTHESIZER (Generates authentic, rigorous, infinitely varied questions for ANY topic in the world)
-  const subjectName = cleanTopic;
-  const isCodingOrCS = /software|code|program|web|cloud|cyber|app|data|algo|system|network|database|api|interface|service|server|docker|linux|git|stack|queue|tree|graph|python|java|c\+\+|javascript|rust|golang/i.test(cleanTopic);
-  const isBioOrMed = /bio|med|health|cell|gene|disease|clinical|anatomy|pharma|immune|organ|blood|surgery|therapy|patho|dna|rna|virus|bacteria/i.test(cleanTopic);
-  const isBusinessOrEcon = /business|finance|econ|market|trade|cost|stock|manage|commerce|account|invest|audit|tax|firm|price|gdp|inflation|bank/i.test(cleanTopic);
-  const isLawOrEthics = /law|legal|court|right|statute|justice|constitution|crime|contract|policy|ethics|juris|civic|rule/i.test(cleanTopic);
+  // 3. UNIVERSAL DYNAMIC SUBJECT SYNTHESIZER (Subject-Aware, Concept-Grounded Viva Engine)
+  const conceptResult = autoDetectConcepts(rawSubject, cleanTopic);
+  const detectedConcepts = conceptResult.concepts || [];
+  const selectedConcept = detectedConcepts[0] || `${cleanTopic} Operational Parameters`;
 
-  let dynamicQuestionPool = [];
+  const groundedQuestions = generateConceptGroundedQuestions(
+    conceptResult.subject || rawSubject || cleanTopic,
+    conceptResult.topic || cleanTopic,
+    selectedConcept,
+    { count, questionType: 'mixed', difficulty: 'Adaptive' }
+  );
 
-  if (isCodingOrCS) {
-    dynamicQuestionPool = [
-      {
-        level: 1,
-        bloomLevel: 'Remembering',
-        type: 'mcq',
-        questionText: `In the architecture and runtime execution of ${subjectName}, which core computational mechanism guarantees determinism, state isolation, and prevents race conditions?`,
-        options: [
-          `Thread-safe synchronization primitives, memory barriers, and atomic CAS (Compare-And-Swap) operations for shared state in ${subjectName}`,
-          `Arbitrary asynchronous background mutations without lock acquisition or transaction boundaries`,
-          `Complete elimination of call stacks and recursive memory frames during execution`,
-          `Relying on hardware register leaks to synchronize independent OS subprocesses`
-        ],
-        correctIndex: 0,
-        hints: [
-          `Consider concurrency safety and memory consistency in multi-threaded environments.`,
-          `Shared mutable state requires mutual exclusion or lock-free atomic primitives.`,
-          `Compare-And-Swap (CAS) instructions form the foundation of non-blocking data structures.`,
-          `The correct answer relates to thread-safe synchronization and atomic CAS operations.`
-        ],
-        expectedKeywords: ['synchronization', 'atomic', 'thread-safe', 'concurrency', 'state management']
-      },
-      {
-        level: 2,
-        bloomLevel: 'Understanding',
-        type: 'text',
-        questionText: `Explain how memory allocation, garbage collection (or manual deallocation), and cache locality impact performance and latency in ${subjectName}.`,
-        hints: [
-          `Contrast stack allocation (O(1), contiguous) with heap allocation (dynamic overhead, fragmentation).`,
-          `Consider cache lines: sequential memory access maximizes CPU L1/L2 cache hits (spatial locality).`,
-          `Discuss garbage collection pauses (Stop-The-World) vs explicit free() pointer lifecycle.`,
-          `Synthesize how memory layout decisions directly dictate throughput under scale.`
-        ],
-        expectedKeywords: ['memory allocation', 'cache locality', 'heap', 'stack', 'garbage collection', 'latency']
-      },
-      {
-        level: 3,
-        bloomLevel: 'Application',
-        type: 'mcq',
-        questionText: `When designing an enterprise distributed pipeline using ${subjectName}, what architectural pattern prevents cascading failures when downstream services experience severe latency spikes?`,
-        options: [
-          `Circuit Breaker with exponential backoff retries and bounded dead-letter queues in ${subjectName}`,
-          `Unbounded infinite retry loops without timeout or backoff intervals`,
-          `Synchronously blocking all caller threads until downstream nodes reboot`,
-          `Dropping all incoming authorization tokens to bypass queue processing`
-        ],
-        correctIndex: 0,
-        bloomLevel: 'Application',
-        hints: [
-          'Think about microservices resilience and fault tolerance patterns.',
-          'When a remote service fails, repeatedly pounding it with requests exacerbates the outage.',
-          'A Circuit Breaker trips to "Open" state after consecutive errors, failing fast and protecting callers.',
-          'The correct choice is the Circuit Breaker pattern with backoff and dead-letter queues.'
-        ],
-        expectedKeywords: ['circuit breaker', 'fault tolerance', 'exponential backoff', 'resilience', 'dead-letter queue']
-      },
-      {
-        level: 4,
-        bloomLevel: 'Analysis',
-        type: 'mcq',
-        questionText: `In asymptotic complexity analysis for ${subjectName}, what distinguishes amortized O(1) time complexity from worst-case O(1) time complexity?`,
-        options: [
-          `Amortized O(1) guarantees that the average time per operation over a long sequence of N operations is constant (e.g. dynamic array doubling), even if individual reallocations take O(N) time`,
-          `Amortized O(1) means the operation takes constant time only when CPU frequency is doubled`,
-          `Worst-case O(1) requires garbage collection to be disabled in the runtime environment`,
-          `Amortized O(1) is identical to O(N log N) when executed across multi-core processors`
-        ],
-        correctIndex: 0,
-        bloomLevel: 'Analysis',
-        hints: [
-          'Recall how dynamic arrays (like Python list or C++ std::vector) resize when capacity is exhausted.',
-          'Appending N items causes occasional expensive reallocations (copying N elements).',
-          'Summing total work across all N inserts gives O(N), yielding O(1) amortized cost per insert.',
-          'The correct answer is that the average time over a sequence of operations is constant.'
-        ],
-        expectedKeywords: ['amortized', 'worst-case', 'time complexity', 'big o', 'reallocation']
-      },
-      {
-        level: 5,
-        bloomLevel: 'Evaluation',
-        type: 'text',
-        questionText: `Critically analyze the security vulnerabilities and defensive countermeasures (such as injection mitigation, input sanitization, and cryptographic integrity) essential when hardening ${subjectName}.`,
-        hints: [
-          `Identify primary attack vectors: injection, unauthorized privilege escalation, buffer overflows, or data leakage.`,
-          `Explain defense-in-depth: parameterized interfaces, zero-trust validation, and least privilege access.`,
-          `Discuss cryptographic signatures (HMAC, TLS 1.3) and secret rotation.`,
-          `Synthesize how defensive validation guarantees runtime security without degrading SLA benchmarks.`
-        ],
-        expectedKeywords: ['security', 'vulnerability', 'sanitization', 'least privilege', 'encryption', 'hardening']
-      }
-    ];
-  } else if (isBioOrMed) {
-    dynamicQuestionPool = [
-      {
-        level: 1,
-        bloomLevel: 'Remembering',
-        type: 'mcq',
-        questionText: `In physiological and biochemical regulation governing ${subjectName}, what primary feedback mechanism maintains homeostatic equilibrium?`,
-        options: [
-          `Negative feedback loops where the accumulation of product inhibits initial pathway enzymatic catalysts in ${subjectName}`,
-          `Uncontrolled positive feedback cascades that trigger permanent thermodynamic destabilization`,
-          `Complete absence of receptor-ligand specificity across cellular membranes`,
-          `Spontaneous denaturation of cellular enzymes without allosteric regulation`
-        ],
-        correctIndex: 0,
-        hints: [
-          'Homeostasis requires physiological stability around a set-point.',
-          'When output levels rise, the system dampens upstream synthesis.',
-          'Negative feedback restores equilibrium and avoids toxic accumulation.',
-          'The correct answer is negative feedback loops with allosteric inhibition.'
-        ],
-        expectedKeywords: ['homeostasis', 'negative feedback', 'regulation', 'pathway', 'equilibrium']
-      },
-      {
-        level: 2,
-        bloomLevel: 'Understanding',
-        type: 'text',
-        questionText: `Explain the molecular, cellular, or clinical mechanism of ${subjectName}. How do specific receptors, substrates, or cellular components mediate the physiological response?`,
-        hints: [
-          'Identify the key functional molecules, receptors, or cellular pathways involved.',
-          'Describe the chain of signal transduction or metabolic transformation.',
-          'Discuss how concentration gradients or membrane potentials drive the process.',
-          'Synthesize how cellular response alters physiological function.'
-        ],
-        expectedKeywords: ['cellular mechanism', 'receptor', 'signaling', 'pathway', 'physiological response']
-      },
-      {
-        level: 3,
-        bloomLevel: 'Analysis',
-        type: 'mcq',
-        questionText: `When ${subjectName} experiences pathological degradation or chemical inhibition, what represents the primary physiological failure mode?`,
-        options: [
-          `Disruption of receptor binding affinity, metabolic accumulation of intermediates, and loss of selective membrane permeability in ${subjectName}`,
-          `Instantaneous conversion of all cellular mass into kinetic energy`,
-          `Permanent zero-entropy state with complete cessation of brownian motion`,
-          `Infinite acceleration of enzymatic turnover without substrate binding`
-        ],
-        correctIndex: 0,
-        hints: [
-          'Consider what happens when regulatory or metabolic pathways break down.',
-          'Pathology typically involves receptor desensitization, enzyme inhibition, or metabolic blockages.',
-          'Loss of membrane integrity leads to cell death or systemic failure.',
-          'The correct answer is disruption of binding affinity and loss of selective permeability.'
-        ],
-        expectedKeywords: ['pathology', 'inhibition', 'failure mode', 'metabolic', 'membrane permeability']
-      }
-    ];
-  } else if (isBusinessOrEcon) {
-    dynamicQuestionPool = [
-      {
-        level: 1,
-        bloomLevel: 'Remembering',
-        type: 'mcq',
-        questionText: `In economic analysis and enterprise decision-making for ${subjectName}, how is Opportunity Cost formulated and applied to strategic resource allocation?`,
-        options: [
-          `The quantified economic value of the next best foregone alternative when a choice is made regarding ${subjectName}`,
-          `The historical sunk cost that cannot be recovered regardless of future decisions`,
-          `The accounting book value of fixed physical assets after standard depreciation`,
-          `The legal penalty incurred when terminating an employment agreement prematurely`
-        ],
-        correctIndex: 0,
-        hints: [
-          'Resources are scarce, meaning choosing option A means giving up option B.',
-          'Opportunity cost represents the benefit that could have been gained from the best alternative.',
-          'Sunk costs are irrecoverable and should not influence future decisions.',
-          'The correct definition is the value of the next best foregone alternative.'
-        ],
-        expectedKeywords: ['opportunity cost', 'resource allocation', 'foregone alternative', 'trade-off', 'economic value']
-      },
-      {
-        level: 2,
-        bloomLevel: 'Understanding',
-        type: 'text',
-        questionText: `Explain how supply and demand dynamics, price elasticity, and market equilibrium interact in the context of ${subjectName}.`,
-        hints: [
-          'Recall how price changes affect quantity demanded (elastic vs inelastic goods).',
-          'Explain how competitive market forces push prices toward market clearing equilibrium.',
-          'Discuss shift factors (income, input costs, regulations) versus movements along the curve.',
-          'Synthesize how market equilibrium optimizes consumer and producer surplus.'
-        ],
-        expectedKeywords: ['supply and demand', 'elasticity', 'market equilibrium', 'price mechanism', 'surplus']
-      },
-      {
-        level: 3,
-        bloomLevel: 'Analysis',
-        type: 'mcq',
-        questionText: `Under macroeconomic volatility and high interest rates, what financial risk metric evaluates the sensitivity of investment cash flows in ${subjectName}?`,
-        options: [
-          `Net Present Value (NPV) adjusted by the Weighted Average Cost of Capital (WACC) and scenario-based Value at Risk (VaR) in ${subjectName}`,
-          `Simple nominal revenue addition without discount rate or time-value-of-money adjustments`,
-          `The arithmetic mean of past five years’ gross sales ignoring debt obligations`,
-          `Fixed asset physical inventory count divided by total employees`
-        ],
-        correctIndex: 0,
-        hints: [
-          'Time value of money dictates that future cash flows must be discounted.',
-          'WACC reflects the required rate of return for debt and equity holders.',
-          'Positive NPV investments generate shareholder value above capital costs.',
-          'The correct financial metrics are NPV with WACC and Value at Risk (VaR).'
-        ],
-        expectedKeywords: ['npv', 'wacc', 'cash flow', 'discount rate', 'risk assessment']
-      }
-    ];
-  } else {
-    // Physical Sciences & Core Engineering
-    dynamicQuestionPool = [
-      {
-        level: 1,
-        bloomLevel: 'Remembering',
-        type: 'mcq',
-        questionText: `In the rigorous scientific analysis of ${subjectName}, which fundamental conservation law and governing relationship establishes dynamic equilibrium?`,
-        options: [
-          `Conservation of energy and mass flux balance between inputs, internal state storage, and dissipated work in ${subjectName}`,
-          `Spontaneous creation of energy without thermodynamic or mechanical input`,
-          `Arbitrary stochastic fluctuations with zero causal correlation to system parameters`,
-          `Complete absence of reactive, dissipative, or inertial resistance in the system`
-        ],
-        correctIndex: 0,
-        hints: [
-          `Consider causality and physical conservation laws governing ${subjectName}.`,
-          `System response depends on internal properties under applied inputs.`,
-          `Stability requires equilibrium between excitation and resistance.`,
-          `The correct answer relates to conservation of energy and mass flux balance.`
-        ],
-        expectedKeywords: ['conservation', 'equilibrium', 'energy', 'flux balance', 'governing law']
-      },
-      {
-        level: 2,
-        bloomLevel: 'Understanding',
-        type: 'text',
-        questionText: `Explain the fundamental operational mechanism and mathematical/empirical equations that characterize ${subjectName}. How do boundary conditions influence steady-state stability?`,
-        hints: [
-          `Identify the primary technical definition and operational boundary of ${subjectName}.`,
-          `Formulate the governing equations or state transitions characterizing ${subjectName}.`,
-          `Recall the dimensional units and operational constants involved.`,
-          `Synthesize the physical or mathematical boundary under which these laws hold.`
-        ],
-        expectedKeywords: ['governing equations', 'boundary conditions', 'stability', 'mechanism', 'steady-state']
-      },
-      {
-        level: 3,
-        bloomLevel: 'Application',
-        type: 'mcq',
-        questionText: `When ${subjectName} is subjected to critical boundary conditions or operational saturation, what constitutes the primary performance bottleneck or failure mode?`,
-        options: [
-          `Non-linear distortion, parasitic interference, or capacity saturation exceeding safe operational thresholds in ${subjectName}`,
-          `Instantaneous drop in entropy without thermodynamic or computational degradation`,
-          `Strict linear response without any parameter variance across infinite range`,
-          `Spontaneous infinite amplification with zero external power or input excitation`
-        ],
-        correctIndex: 0,
-        hints: [
-          `Consider what happens when materials, circuits, or algorithms exceed design limits.`,
-          `Look for saturation, non-linear distortion, or breakdown beyond thresholds.`,
-          `Safety and design margins exist to avoid non-linear degradation.`,
-          `The correct answer is non-linear distortion or saturation exceeding operational thresholds.`
-        ],
-        expectedKeywords: ['failure mode', 'threshold', 'bottleneck', 'saturation', 'non-linear']
-      },
-      {
-        level: 4,
-        bloomLevel: 'Analysis',
-        type: 'mcq',
-        questionText: `Which architectural or algorithmic technique is standard engineering practice to mitigate noise and maximize throughput in ${subjectName}?`,
-        options: [
-          `Feedback stabilization, domain-appropriate filtering, and impedance/protocol matching in ${subjectName}`,
-          `Completely removing synchronization and relying on open-loop unconstrained propagation`,
-          `Deliberately increasing parasitic propagation delay to slow down data processing`,
-          `Inverting control polarity without verifying ground reference stability`
-        ],
-        correctIndex: 0,
-        hints: [
-          `Consider standard engineering strategies for throughput and noise immunity.`,
-          `Feedback stabilization and filtering are foundational optimization methods.`,
-          `Filtering eliminates out-of-band noise while maintaining state integrity.`,
-          `The correct answer involves feedback stabilization and filtering.`
-        ],
-        expectedKeywords: ['feedback', 'stabilization', 'filtering', 'throughput', 'protocol matching']
-      },
-      {
-        level: 5,
-        bloomLevel: 'Evaluation',
-        type: 'text',
-        questionText: `Critically evaluate the architectural trade-offs, standards compliance, and safety factor validation required when certifying an enterprise implementation of ${subjectName}.`,
-        hints: [
-          `Define the factor of safety or margin of reliability required for ${subjectName}.`,
-          `Discuss testing protocols, simulation workflows, or empirical validations.`,
-          `Identify environmental degradation factors (temperature, noise, load fluctuations).`,
-          `Deliver a technical justification balancing operational performance against safety margins.`
-        ],
-        expectedKeywords: ['factor of safety', 'reliability', 'certification', 'validation', 'trade-off']
-      }
-    ];
+  if (groundedQuestions && groundedQuestions.length > 0) {
+    return groundedQuestions.slice(0, count).map((q, idx) => normalizeQuestion(q, idx, cleanTopic));
   }
 
-  // Randomly shuffle the pool so question order and selection change dynamically on every run
-  const shuffledPool = [...dynamicQuestionPool].sort(() => Math.random() - 0.5);
-
-  const results = [];
-  let i = 0;
-  while (results.length < count) {
-    const q = shuffledPool[i % shuffledPool.length];
-    // Pass through normalizeQuestion to ensure options are always rotated and swiped
-    results.push(normalizeQuestion(q, i, cleanTopic));
-    i++;
-  }
-  return results.slice(0, count);
+  // Final deterministic fallback with subject-safe normalization
+  return [
+    normalizeQuestion({
+      level: 1,
+      bloomLevel: 'Understanding',
+      type: 'text',
+      questionText: `What technical principles and governing mechanisms define ${selectedConcept} in the analysis of ${cleanTopic}?`,
+      hints: [
+        `State the formal scientific definition of ${selectedConcept}.`,
+        `Identify the primary operational variables involved.`,
+        `Discuss how these variables influence overall system response in ${cleanTopic}.`,
+        `Relate this concept to practical engineering or scientific execution.`
+      ],
+      expectedKeywords: [cleanTopic.toLowerCase(), selectedConcept.toLowerCase(), 'definition', 'variables', 'operation']
+    }, 0, cleanTopic)
+  ];
 }
 
 // Generate questions directly from uploaded syllabus/document text
@@ -2353,10 +2075,10 @@ export function generateQuestionsFromDocument(documentText, topic, count = 10) {
     let fCorrect = 0;
     if (idx % 2 === 0) {
       const rawOpts = [
-        `It establishes the foundational mechanism and operational constraints described in the document`,
-        `It represents an arbitrary assumption that has no physical or mathematical relevance`,
-        `It contradicts fundamental scientific laws and is rejected in practice`,
-        `It operates with zero consideration of boundary parameters`
+        `It states the primary technical relationship and governing conditions documented in the course material`,
+        `It suggests an arbitrary empirical constant without analytical relevance`,
+        `It assumes that dynamic parameters remain unchanged despite boundary variations`,
+        `It describes an unverified hypothesis that lacks empirical validation in the text`
       ];
       const indexed = rawOpts.map((opt, i) => ({ text: opt, isCorrect: i === 0 }));
       for (let i = indexed.length - 1; i > 0; i--) {

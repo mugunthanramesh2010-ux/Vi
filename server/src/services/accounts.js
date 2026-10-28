@@ -42,17 +42,57 @@ class AccountService {
   }
 
   initDefaultFaculty() {
+    let changed = false;
     // Seed default offline faculty account if not exists
     if (!this.accounts['faculty']) {
       this.accounts['faculty'] = {
         username: 'faculty',
         name: 'Lead Faculty Examiner',
         role: 'faculty',
-        department: 'ECE',
+        department: 'Biotechnology',
         passwordHash: hashPassword('faculty123'),
-        assignedSubjects: ['Control Systems', 'Digital Electronics', 'VLSI Design', 'Universal Domain'],
+        assignedSubjects: ['Biotechnology', 'Bioreactor Design', 'Control Systems', 'Digital Electronics', 'Universal Domain'],
         createdAt: new Date().toISOString()
       };
+      changed = true;
+    }
+
+    // Seed default student accounts in distinct sections for deterministic testing
+    if (!this.accounts['student_a']) {
+      this.accounts['student_a'] = {
+        username: 'student_a',
+        name: 'Aravind Swaminathan (Sec A)',
+        role: 'student',
+        department: 'Biotechnology',
+        year: 'III',
+        section: 'A',
+        semester: '5',
+        regNo: 'BIO2026A01',
+        passwordHash: hashPassword('student123'),
+        assignedSubjects: ['Biotechnology', 'Bioreactor Design'],
+        createdAt: new Date().toISOString()
+      };
+      changed = true;
+    }
+
+    if (!this.accounts['student_b']) {
+      this.accounts['student_b'] = {
+        username: 'student_b',
+        name: 'Bhavana Ramesh (Sec B)',
+        role: 'student',
+        department: 'Biotechnology',
+        year: 'III',
+        section: 'B',
+        semester: '5',
+        regNo: 'BIO2026B01',
+        passwordHash: hashPassword('student123'),
+        assignedSubjects: ['Biotechnology', 'Bioreactor Design'],
+        createdAt: new Date().toISOString()
+      };
+      changed = true;
+    }
+
+    if (changed) {
       this.saveAccounts();
     }
   }
@@ -79,6 +119,10 @@ class AccountService {
       name: userData.name || (role === 'faculty' ? 'Faculty Member' : 'Student'),
       role,
       department: userData.department || 'Engineering',
+      year: userData.year || userData.classYear || 'III',
+      section: userData.section || 'A',
+      semester: userData.semester || '5',
+      programme: userData.programme || userData.department || 'Engineering',
       regNo: userData.regNo || (role === 'student' ? username.toUpperCase() : null),
       passwordHash: hashPassword(userData.password),
       assignedSubjects: userData.assignedSubjects || ['Universal Domain'],
@@ -95,6 +139,10 @@ class AccountService {
         name: newAccount.name,
         role: newAccount.role,
         department: newAccount.department,
+        year: newAccount.year,
+        section: newAccount.section,
+        semester: newAccount.semester,
+        programme: newAccount.programme,
         regNo: newAccount.regNo
       }
     };
@@ -123,6 +171,10 @@ class AccountService {
         name: account.name,
         role: account.role,
         department: account.department,
+        year: account.year || 'III',
+        section: account.section || 'A',
+        semester: account.semester || '5',
+        programme: account.programme || account.department || 'Engineering',
         regNo: account.regNo,
         assignedSubjects: account.assignedSubjects || []
       }
@@ -196,9 +248,36 @@ class AccountService {
       name: acc.name,
       role: acc.role,
       department: acc.department,
+      year: acc.year || 'III',
+      section: acc.section || 'A',
+      semester: acc.semester || '5',
+      programme: acc.programme || acc.department || 'Engineering',
       regNo: acc.regNo,
       assignedSubjects: acc.assignedSubjects || []
     };
+  }
+
+  /**
+   * Look up students belonging to a target class year and sections
+   */
+  getStudentsByCohort(classYear, sections = [], department = null) {
+    const secList = Array.isArray(sections) ? sections : [sections];
+    return Object.values(this.accounts)
+      .filter(acc => acc.role === 'student')
+      .filter(acc => {
+        const yearMatches = !classYear || acc.year === classYear;
+        const secMatches = secList.length === 0 || secList.includes(acc.section);
+        const deptMatches = !department || department === 'All Departments' || acc.department === department;
+        return yearMatches && secMatches && deptMatches;
+      })
+      .map(acc => ({
+        username: acc.username,
+        name: acc.name,
+        regNo: acc.regNo || acc.username.toUpperCase(),
+        department: acc.department,
+        year: acc.year,
+        section: acc.section
+      }));
   }
 }
 
